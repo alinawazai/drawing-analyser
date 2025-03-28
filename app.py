@@ -33,9 +33,11 @@ except LookupError:
 
 # Load environment variables
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-COHERE_API_KEY = os.getenv("COHERE_API_KEY")
+# Access keys directly from Streamlit Secrets
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
+
 
 # Create temporary directories for this session (these persist while the app runs)
 if "base_dir" not in st.session_state:
