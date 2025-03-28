@@ -5,7 +5,7 @@ import glob
 import logging
 import concurrent.futures
 from uuid import uuid4
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import tempfile
 
 import streamlit as st
@@ -32,12 +32,13 @@ except LookupError:
     nltk.download('punkt_tab')
 
 # Load environment variables
-load_dotenv()
-# Access keys directly from Streamlit Secrets
+# load_dotenv()
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
-
 
 # Create temporary directories for this session (these persist while the app runs)
 if "base_dir" not in st.session_state:
