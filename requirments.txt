@@ -10,4 +10,4 @@ nltk
 Pillow
 google-generativeai
 python-dotenv
-pymupdf
+PyMuPDF
