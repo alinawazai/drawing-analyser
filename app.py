@@ -9,7 +9,7 @@ from uuid import uuid4
 import tempfile
 
 import streamlit as st
-import fitz  # PyMuPDF
+# import fitz  # PyMuPDF
 from PIL import Image
 from ultralytics import YOLO
 from langchain.schema import Document
@@ -24,6 +24,11 @@ from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
 import nltk
+try:
+    import fitz
+except ImportError:
+    os.system('pip install PyMuPDF')
+    import fitz
 
 # Download required NLTK resource if needed.
 try:
