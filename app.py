@@ -366,6 +366,15 @@
 #             st.error(f"Search failed: {e}")
 
 # st.write("Streamlit app finished processing.")
+
+
+
+
+
+
+
+
+
 import os
 import json
 import time
@@ -373,11 +382,9 @@ import glob
 import logging
 import concurrent.futures
 from uuid import uuid4
-# from dotenv import load_dotenv
 import tempfile
 
 import streamlit as st
-# import fitz  # PyMuPDF
 from PIL import Image
 from ultralytics import YOLO
 from langchain.schema import Document
@@ -392,6 +399,8 @@ from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
 import nltk
+
+# Ensure proper initialization of the fitz module
 try:
     import fitz
 except ImportError:
@@ -405,10 +414,6 @@ except LookupError:
     nltk.download('punkt_tab')
 
 # Load environment variables
-# load_dotenv()
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
@@ -425,16 +430,16 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 for d in [LOW_RES_DIR, HIGH_RES_DIR, OUTPUT_DIR]:
     os.makedirs(d, exist_ok=True)
 
-# Initialize session state for processed flag and results
+# Initialize session state for processed flag and logs
 if "processed" not in st.session_state:
     st.session_state.processed = False
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
 
-# Initialize logs in session state
+# Ensure logs are initialized in session state
 if "logs" not in st.session_state:
-    st.session_state.logs = []  # This ensures logs are initialized
+    st.session_state.logs = []
 
 # Use columns for layout: left for pipeline & logs, right for chat.
 col1, col2 = st.columns([1, 3])
