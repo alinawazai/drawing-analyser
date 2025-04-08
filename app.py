@@ -333,6 +333,7 @@ async def run_processing_pipeline(pdf_path):
     return vector_store, compression_retriever
 
 # Function to handle saving the vector database
+# Function to handle saving the vector database
 def save_vector_db(vector_store):
     try:
         vector_db_path = os.path.join(DATA_DIR, "vector_db_index.faiss")
@@ -364,5 +365,32 @@ def run_streamlit():
     if st.session_state.processed and st.sidebar.button("Save Vector Database"):
         save_vector_db(st.session_state.vector_store)
 
+    # Adding Query Text Box for Searching
+    if st.session_state.processed:
+        query = st.text_input("Enter your query here:")
+
+        if query:
+            # Perform the retrieval from the vector store
+            log_message("Performing search query...")
+
+            try:
+                results = st.session_state.compression_retriever.invoke(query)
+                st.markdown("### Retrieved Documents:")
+
+                for doc in results:
+                    drawing = doc.metadata.get("drawing_name", "Unknown")
+                    st.write(f"**Drawing:** {drawing}")
+                    try:
+                        st.json(json.loads(doc.page_content))  # Display content in JSON format
+                    except Exception:
+                        st.write(doc.page_content)  # Fallback if JSON parsing fails
+
+                    img_path = doc.metadata.get("drawing_path", "")
+                    if img_path and os.path.exists(img_path):
+                        st.image(Image.open(img_path), caption=f"Image for {drawing}", width=400)
+
+            except Exception as e:
+                st.error(f"Search failed: {e}")
+    
 # Execute Streamlit UI
 run_streamlit()
