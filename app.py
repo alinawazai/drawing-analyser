@@ -20,11 +20,12 @@ from langchain.retrievers.contextual_compression import ContextualCompressionRet
 from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
-import nltk
 import streamlit as st
 from prompts import OCR_PROMPT
 from google import genai
 
+import nltk
+nltk.download('punkt')
 # Download required NLTK resource if needed.
 try:
     nltk.data.find('tokenizers/punkt_tab')
