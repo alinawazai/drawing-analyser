@@ -19,13 +19,12 @@ from langchain.retrievers import EnsembleRetriever
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
-import torch
 import streamlit as st
 from prompts import OCR_PROMPT
 from google import genai
-
+import torch
 import nltk
-nltk.download('punkt')
+
 # Download required NLTK resource if needed.
 try:
     nltk.data.find('tokenizers/punkt_tab')
@@ -34,6 +33,7 @@ except LookupError:
         nltk.download('punkt_tab', quiet=True)
     except FileExistsError:
         pass
+
 # Asyncio setup to allow async calls
 nest_asyncio.apply()
 
@@ -212,17 +212,12 @@ async def process_with_gemini_async(image_paths, prompt):
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
-    print(f"Gemini OCR response: {resp_text}")
-    if not resp_text:
-        log_message("Empty response from Gemini OCR.")
-        return None
-    return resp_text
 
-    # try:
-    #     return json.loads(resp_text)
-    # except json.JSONDecodeError:
-    #     log_message(f"Failed to parse JSON: {resp_text}")
-    #     return None
+    try:
+        return json.loads(resp_text)
+    except json.JSONDecodeError:
+        log_message(f"Failed to parse JSON: {resp_text}")
+        return None
 
 # Process pages with metadata using Gemini OCR asynchronously
 async def process_all_pages_async(data, prompt):
@@ -314,7 +309,7 @@ async def run_processing_pipeline(pdf_path):
 
     uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
     try:
-        vector_store.add_documents(documents=gemini_documents, ids=uuids)
+        vector_store.aadd_documents(documents=gemini_documents, ids=uuids)
     except Exception as e:
         log_message(f"Error adding documents to FAISS: {e}")
         return None, None
@@ -383,13 +378,13 @@ def run_streamlit():
             loop = asyncio.get_event_loop()
             vector_store, compression_retriever = loop.run_until_complete(run_processing_pipeline(pdf_path))
 
-    # # Option to save the vector database after processing is done
-    # if st.session_state.processed and st.sidebar.button("Save Vector Database"):
-    #     save_vector_db(st.session_state.vector_store)
+    # Option to save the vector database after processing is done
+    if st.session_state.processed and st.sidebar.button("Save Vector Database"):
+        save_vector_db(st.session_state.vector_store)
 
-    # # Option to download the vector database
-    # if st.session_state.vector_db_path and st.session_state.vector_db_saved:
-    #     st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
+    # Option to download the vector database
+    if st.session_state.vector_db_path and st.session_state.vector_db_saved:
+        st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
 
 
     if query:
@@ -404,10 +399,10 @@ def run_streamlit():
                 for doc in results:
                     drawing = doc.metadata.get("drawing_name", "Unknown")
                     st.write(f"**Drawing:** {drawing}")
-                    # try:
-                    #     st.json(json.loads(doc.page_content))  # Display content in JSON format
-                    # except Exception:
-                    #     st.write(doc.page_content)  # Fallback if JSON parsing fails
+                    try:
+                        st.json(json.loads(doc.page_content))  # Display content in JSON format
+                    except Exception:
+                        st.write(doc.page_content)  # Fallback if JSON parsing fails
 
                     img_path = doc.metadata.get("drawing_path", "")
                     if img_path and os.path.exists(img_path):
