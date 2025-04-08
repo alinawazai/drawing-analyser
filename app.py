@@ -203,6 +203,10 @@ async def process_with_gemini_async(image_paths, prompt):
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
+    print(f"Gemini OCR response: {resp_text}")
+    if not resp_text:
+        log_message("Empty response from Gemini OCR.")
+        return None
     return resp_text
 
     # try:
