@@ -92,9 +92,6 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         raise
 
     file_paths = []
-    # Optional: Limit number of pages (e.g., process only first 10 pages) 
-    # max_pages = min(len(doc), 10)
-    # for i in range(max_pages):
     for i in range(len(doc)):
         page = doc[i]
         scale = fixed_length / page.rect.width
@@ -124,7 +121,6 @@ class BlockDetectionModel:
         output = {}
         batch_size = 10  # Process 10 images at a time
         
-        # Process images in batches of 10
         for i in range(0, len(images), batch_size):
             batch = images[i:i + batch_size]
             log_message(f"Processing images {i + 1} to {min(i + batch_size, len(images))} of {len(images)}.")
@@ -137,7 +133,6 @@ class BlockDetectionModel:
         
         log_message("Block detection completed.")
         return output
-
 
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
@@ -179,7 +174,6 @@ def crop_and_save(detection_output, output_dir):
 
 def process_with_gemini(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
-    # Even though this step is originally asynchronous, processing sequentially reduces load.
     contents = [prompt]
     for path in image_paths:
         try:
@@ -189,7 +183,6 @@ def process_with_gemini(image_paths, prompt):
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
 
-    # time.sleep(4)  # Simple rate-limiting
     response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
@@ -239,11 +232,8 @@ def process_all_pages(data, prompt):
 # UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
-# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
-# [server]
-# fileWatcherType = "none"
-
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
+uploaded_vectorstore = st.sidebar.file_uploader("Upload Vector Store", type=["pkl"])
 
 if uploaded_pdf:
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
@@ -251,6 +241,14 @@ if uploaded_pdf:
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
     st.sidebar.success("PDF uploaded successfully.")
+
+if uploaded_vectorstore:
+    vectorstore_path = os.path.join(DATA_DIR, uploaded_vectorstore.name)
+    with open(vectorstore_path, "wb") as f:
+        f.write(uploaded_vectorstore.getbuffer())
+    st.sidebar.success("Vector store uploaded successfully.")
+    # Load the uploaded vector store into session state
+    st.session_state.vector_store = FAISS.load_local(vectorstore_path)
 
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
@@ -353,7 +351,22 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.vector_store = vector_store
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
+        
+        # Button to download the vector store after processing is complete
+        def save_vector_store():
+            vectorstore_path = os.path.join(DATA_DIR, "vector_store.pkl")
+            vector_store.save_local(vectorstore_path)
+            with open(vectorstore_path, "rb") as f:
+                st.download_button(
+                    label="Download Vector Store",
+                    data=f,
+                    file_name="vector_store.pkl",
+                    mime="application/octet-stream"
+                )
+        
+        save_vector_store()
 
+# Search functionality
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
