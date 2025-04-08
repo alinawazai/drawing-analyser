@@ -92,6 +92,9 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         raise
 
     file_paths = []
+    # Optional: Limit number of pages (e.g., process only first 10 pages) 
+    # max_pages = min(len(doc), 10)
+    # for i in range(max_pages):
     for i in range(len(doc)):
         page = doc[i]
         scale = fixed_length / page.rect.width
@@ -174,12 +177,10 @@ def crop_and_save(detection_output, output_dir):
     log_message("Cropping completed.")
     return output_data
 
-# Asynchronous function to process Gemini OCR
-async def process_with_gemini_async(image_paths, prompt):
-    log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
+def process_with_gemini(image_paths, prompt):
+    log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
+    # Even though this step is originally asynchronous, processing sequentially reduces load.
     contents = [prompt]
-    
-    # Prepare the images to send to Gemini
     for path in image_paths:
         try:
             with Image.open(path) as img:
@@ -187,26 +188,22 @@ async def process_with_gemini_async(image_paths, prompt):
                 contents.append(img_resized)
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
-            continue
-    
-    # Call the Gemini API to process the images asynchronously
-    response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
+
+    # time.sleep(4)  # Simple rate-limiting
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
-    
-    # Get the response text and clean it up by removing Markdown code block markers
     resp_text = response.text.strip()
-    if resp_text.startswith("```json"):
-        resp_text = resp_text.replace("```json", "").replace("```", "").strip()
-    
-    # Try parsing the cleaned-up response as JSON
+    if resp_text.startswith("```"):
+        resp_text = resp_text.replace("```", "").strip()
+        if resp_text.lower().startswith("json"):
+            resp_text = resp_text[4:].strip()
     try:
         return json.loads(resp_text)
     except json.JSONDecodeError:
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
 
-# Helper function to process each page asynchronously
-async def process_page_with_metadata_async(page_key, blocks, prompt):
+def process_page_with_metadata(page_key, blocks, prompt):
     log_message(f"Processing page: {page_key}")
     all_imgs = []
     for block_type, paths in blocks.items():
@@ -215,7 +212,7 @@ async def process_page_with_metadata_async(page_key, blocks, prompt):
     if not all_imgs:
         log_message(f"No cropped images for {page_key}")
         return None
-    raw_metadata = await process_with_gemini_async(all_imgs, prompt)
+    raw_metadata = process_with_gemini(all_imgs, prompt)
     if raw_metadata:
         doc = Document(
             page_content=json.dumps(raw_metadata),
@@ -227,26 +224,29 @@ async def process_page_with_metadata_async(page_key, blocks, prompt):
         log_message(f"No metadata extracted for {page_key}")
         return None
 
-# Main function to process all pages asynchronously
-async def process_all_pages_async(data, prompt):
+def process_all_pages(data, prompt):
     documents = []
     for key, blocks in data.items():
-        doc = await process_page_with_metadata_async(key, blocks, prompt)
+        doc = process_page_with_metadata(key, blocks, prompt)
         if doc:
             documents.append(doc)
         else:
             log_message(f"No document returned for {key}")
-    log_message(f"Total {len(documents)} documents processed asynchronously.")
+    log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
 
 # -------------------------
 # UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
+# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
+# [server]
+# fileWatcherType = "none"
+
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
@@ -312,8 +312,8 @@ if uploaded_pdf and not st.session_state.processed:
                 "Notes_on_Drawing": "Example notes here."
             }}
             """
-        log_message("Extracting metadata using Gemini OCR asynchronously...")
-        gemini_documents = await process_all_pages_async(cropped_data, ocr_prompt)
+        log_message("Extracting metadata using Gemini OCR sequentially...")
+        gemini_documents = process_all_pages(cropped_data, ocr_prompt)
         log_message("Metadata extraction completed.")
         gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
         with open(gemini_json_path, "w") as f:
@@ -354,9 +354,6 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
-# -------------------------
-# UI Layout
-# -------------------------
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
