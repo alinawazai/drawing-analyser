@@ -2,7 +2,7 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import asyncio
-# Ensure an active event loop exists.
+# Ensure an active event loop exists before importing other libraries.
 try:
     asyncio.get_running_loop()
 except RuntimeError:
@@ -55,13 +55,14 @@ LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
 HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 
-# Set up basic logging
+# Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
+# Minimal log function: simply print messages to the Streamlit sidebar.
 def log_message(msg):
     st.sidebar.write(msg)
 
-# Initialize session state (if not already)
+# Initialize session state (only processed flag and cached results)
 if "processed" not in st.session_state:
     st.session_state.processed = False
     st.session_state.gemini_documents = None
@@ -69,7 +70,7 @@ if "processed" not in st.session_state:
     st.session_state.compression_retriever = None
 
 # -------------------------
-# Pipeline Functions (unchanged)
+# Pipeline Functions
 # -------------------------
 def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
@@ -101,18 +102,143 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message("PDF conversion completed.")
     return file_paths
 
-# (Other functions remain the same...)
+class BlockDetectionModel:
+    def __init__(self, weight, device=None):
+        self.device = "cuda" if (device is None and torch.cuda.is_available()) else "cpu"
+        self.model = YOLO(weight).to(self.device)
+        log_message(f"YOLO model loaded on {self.device}.")
+
+    def predict_batch(self, images_dir):
+        if not os.path.exists(images_dir) or not os.listdir(images_dir):
+            raise ValueError(f"Directory {images_dir} is empty or does not exist.")
+        images = glob.glob(os.path.join(images_dir, "*.jpg"))
+        log_message(f"Found {len(images)} low-res images for detection.")
+        results = self.model(images)
+        output = {}
+        for result in results:
+            image_name = os.path.basename(result.path)
+            labels = result.boxes.cls.tolist()
+            boxes = result.boxes.xywh.tolist()
+            output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
+        log_message("Block detection completed.")
+        return output
+
+def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
+    scale_x = dst_size[0] / src_size[0]
+    scale_y = scale_x
+    return bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y
+
+def crop_and_save(detection_output, output_dir):
+    log_message("Cropping detected regions using high-res images...")
+    output_data = {}
+    for image_name, detections in detection_output.items():
+        image_resource_path = os.path.join(output_dir, image_name.replace(".jpg", ""))
+        image_path = os.path.join(HIGH_RES_DIR, image_name)
+        if not os.path.exists(image_resource_path):
+            os.makedirs(image_resource_path)
+        if not os.path.exists(image_path):
+            log_message(f"High-res image missing: {image_path}")
+            continue
+        try:
+            with Image.open(image_path) as image:
+                image_data = {}
+                for det in detections:
+                    label = det["label"]
+                    bbox = det["bbox"]
+                    label_dir = os.path.join(image_resource_path, str(label))
+                    os.makedirs(label_dir, exist_ok=True)
+                    x, y, w, h = scale_bboxes(bbox)
+                    cropped_img = image.crop((x - w / 2, y - h / 2, x + w / 2, y + h / 2))
+                    cropped_name = f"{label}_{len(os.listdir(label_dir)) + 1}.jpg"
+                    cropped_path = os.path.join(label_dir, cropped_name)
+                    cropped_img.save(cropped_path)
+                    image_data.setdefault(label, []).append(cropped_path)
+                image_data["Image_Path"] = image_path
+                output_data[image_name] = image_data
+                log_message(f"Cropped images saved for {image_name}")
+        except Exception as e:
+            log_message(f"Error cropping {image_name}: {e}")
+    log_message("Cropping completed.")
+    return output_data
+
+def process_with_gemini(image_paths, prompt):
+    log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
+    contents = [prompt]
+    for path in image_paths:
+        try:
+            with Image.open(path) as img:
+                # Resize for faster processing
+                img_resized = img.resize((int(img.width / 2), int(img.height / 2)))
+                contents.append(img_resized)
+        except Exception as e:
+            log_message(f"Error opening {path}: {e}")
+    from google import genai
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    time.sleep(4)  # Simple rate-limiting
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
+    log_message("Gemini OCR bulk response received.")
+    resp_text = response.text.strip()
+    if resp_text.startswith("```"):
+        resp_text = resp_text.replace("```", "").strip()
+        if resp_text.lower().startswith("json"):
+            resp_text = resp_text[4:].strip()
+    try:
+        return json.loads(resp_text)
+    except json.JSONDecodeError:
+        log_message(f"Failed to parse JSON: {resp_text}")
+        return None
+
+def process_page_with_metadata(page_key, blocks, prompt):
+    log_message(f"Processing page: {page_key}")
+    all_imgs = []
+    for block_type, paths in blocks.items():
+        if block_type != "Image_Path":
+            all_imgs.extend(paths)
+    if not all_imgs:
+        log_message(f"No cropped images for {page_key}")
+        return None
+    raw_metadata = process_with_gemini(all_imgs, prompt)
+    if raw_metadata:
+        doc = Document(
+            page_content=json.dumps(raw_metadata),
+            metadata={"drawing_path": blocks["Image_Path"], "drawing_name": page_key, "content": "everything"}
+        )
+        log_message(f"Document created for {page_key}")
+        return doc
+    else:
+        log_message(f"No metadata extracted for {page_key}")
+        return None
+
+def process_all_pages(data, prompt):
+    documents = []
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(process_page_with_metadata, key, blocks, prompt): key for key, blocks in data.items()}
+        for future in concurrent.futures.as_completed(futures):
+            key = futures[future]
+            try:
+                doc = future.result()
+                if doc:
+                    documents.append(doc)
+                else:
+                    log_message(f"No document returned for {key}")
+            except Exception as e:
+                log_message(f"Error processing {key}: {e}")
+    log_message(f"Total {len(documents)} documents processed asynchronously.")
+    return documents
 
 # -------------------------
 # UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
-# Simple file uploader (PDF only)
+# IMPORTANT: It is recommended to disable Streamlit's file watcher in your deployment
+# by adding a file named `.streamlit/config.toml` with:
+# [server]
+# fileWatcherType = "none"
+
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
-    # Ensure DATA_DIR exists
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
@@ -122,6 +248,7 @@ if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
         log_message("Converting PDF to images concurrently...")
+        # Run low-res and high-res conversions concurrently.
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_low = executor.submit(pdf_to_images, pdf_path, LOW_RES_DIR, 662)
             future_high = executor.submit(pdf_to_images, pdf_path, HIGH_RES_DIR, 4000)
@@ -138,48 +265,48 @@ if uploaded_pdf and not st.session_state.processed:
         cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
         log_message("Cropping completed.")
 
-        ocr_prompt = """\
-You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
-Within the images you receive, there will be details pertaining to a single construction drawing.
-Your job is to identify and extract exactly below fields from this text:
-- 1st image has details about the drawing_title and scale
-- 2nd Image has details about the client or project
-- 4th Images has Notes
-- 3rd Images has rest of the informations
-- last image is the full image from which the above image are cropped
-1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
-2. Client_Name
-3. Project_Title
-4. Drawing_Title
-5. Floor
-6. Drawing_Number
-7. Project_Number
-8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
-9. Scale
-10. Architects (list of names; use ['Unknown'] if no names are identified)
-11. Notes_on_Drawing (any remarks or additional details related to the drawing)
+        ocr_prompt = """
+            You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
+            Within the images you receive, there will be details pertaining to a single construction drawing.
+            Your job is to identify and extract exactly below fields from this text:
+            - 1st image has details about the drawing_title and scale
+            - 2nd Image has details about the client or project
+            - 4th Images has Notes
+            - 3rd Images has rest of the informations
+            - last image is the full image from which the above image are cropped
+            1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
+            2. Client_Name
+            3. Project_Title
+            4. Drawing_Title
+            5. Floor
+            6. Drawing_Number
+            7. Project_Number
+            8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
+            9. Scale
+            10. Architects (list of names; use ['Unknown'] if no names are identified)
+            11. Notes_on_Drawing (any remarks or additional details related to the drawing)
 
-Key Requirements:
-- If any field is missing, return an empty string ('') or 'N/A' for that field.
-- Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
-- Preserve all text in its original language (no translation), apart from minimal cleaning if necessary.
-- Do not wrap the final JSON in code fences.
-- Return ONLY the final JSON object with these fields and no additional commentary.
-Below is an example json format:
-{
-    "Purpose_Type_of_Drawing": "Architectural",
-    "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
-    "Project_Title": "문촌주공아파트  주택재건축정비사업",
-    "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
-    "Floor": "주단면도-3",
-    "Drawing_Number": "A51-2023",
-    "Project_Number": "EP-201",
-    "Revision_Number": 0,
-    "Scale": "A1 : 1/100, A3 : 1/200",
-    "Architects": ["Unknown"],
-    "Notes_on_Drawing": "• Example note text."
-}
-"""
+            Key Requirements:
+            - If any field is missing, return an empty string ('') or 'N/A' for that field.
+            - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
+            - Preserve all text in its original language (no translation), apart from minimal cleaning if necessary.
+            - Do not wrap the final JSON in code fences.
+            - Return ONLY the final JSON object with these fields and no additional commentary.
+            Below is an example json format:
+            {{
+                "Purpose_Type_of_Drawing": "Architectural",
+                "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
+                "Project_Title": "문촌주공아파트  주택재건축정비사업",
+                "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
+                "Floor": "주단면도-3",
+                "Drawing_Number": "A51-2023",
+                "Project_Number": "EP-201",
+                "Revision_Number": 0,
+                "Scale": "A1 : 1/100, A3 : 1/200",
+                "Architects": ["Unknown"],
+                "Notes_on_Drawing": "Example notes here."
+            }}
+            """
         log_message("Extracting metadata using Gemini OCR asynchronously...")
         gemini_documents = process_all_pages(cropped_data, ocr_prompt)
         log_message("Metadata extraction completed.")
