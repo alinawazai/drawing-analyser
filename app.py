@@ -32,7 +32,8 @@ from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
 import nltk
-
+from google import genai
+client = genai.Client(api_key=GEMINI_API_KEY)
 # Download required NLTK resource if needed.
 try:
     nltk.data.find('tokenizers/punkt_tab')
@@ -188,8 +189,11 @@ def process_with_gemini(image_paths, prompt):
                 contents.append(img_resized)
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
+<<<<<<< HEAD
+=======
 
     # time.sleep(4)  # Simple rate-limiting
+>>>>>>> 898073d96da32db55a90755d0fc9045e1c365e57
     response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
