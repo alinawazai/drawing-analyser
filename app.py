@@ -360,7 +360,7 @@ if st.session_state.processed:
         os.makedirs(DATA_DIR, exist_ok=True)
         
         # Save the vector store to the specified path
-        st.session_state.vector_store.save_local(vectorstore_path)
+        st.session_state.vector_store.save_local(vectorstore_path+".pkl")
         
         # Provide the file for download with the chosen name
         with open(vectorstore_path+".pkl", "rb") as f:
