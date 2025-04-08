@@ -25,7 +25,7 @@ from nltk.tokenize import word_tokenize
 import torch
 import nltk
 from google import genai
-client = genai.Client(api_key=GEMINI_API_KEY)
+
 
 # Download required NLTK resource if needed.
 try:
@@ -47,7 +47,7 @@ DATA_DIR = "data"
 LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
 HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
-
+client = genai.Client(api_key=GEMINI_API_KEY)
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
