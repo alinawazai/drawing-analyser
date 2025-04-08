@@ -1,5 +1,7 @@
-import asyncio
+import nest_asyncio
+nest_asyncio.apply()
 
+import asyncio
 # Ensure an active event loop exists before any other library initialization.
 try:
     asyncio.get_running_loop()
@@ -36,7 +38,11 @@ import nltk
 try:
     nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
-    nltk.download('punkt_tab')
+    try:
+        nltk.download('punkt_tab', quiet=True)
+    except FileExistsError:
+        # If the resource appears to already exist, we skip re-downloading.
+        pass
 
 # Load environment variables
 load_dotenv()
