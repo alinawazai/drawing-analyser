@@ -395,6 +395,7 @@ import fitz  # PyMuPDF
 import streamlit as st
 import glob
 import time
+from prompts import OCR_PROMPT
 
 # Download required NLTK resource if needed.
 try:
@@ -621,11 +622,8 @@ with col1:
             log_message("Cropping detected regions using high-res images...")
             cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
             log_message("Cropping completed.")
-            ocr_prompt = """
-            Your job is to identify and extract metadata from construction drawing images.
-            """
             log_message("Extracting metadata using Gemini OCR...")
-            gemini_documents = process_all_pages(cropped_data, ocr_prompt)
+            gemini_documents = process_all_pages(cropped_data, OCR_PROMPT)
             log_message("Metadata extraction completed.")
             gemini_json_path = os.path.join(BASE_DIR, "gemini_documents.json")
             with open(gemini_json_path, "w") as f:
