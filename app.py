@@ -1,3 +1,12 @@
+import asyncio
+
+# Ensure an active event loop exists before any other library initialization.
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 import os
 import json
 import time
@@ -284,7 +293,7 @@ if uploaded_pdf and not st.session_state.processed:
                 "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
                 "Floor": "주단면도-3",
                 "Drawing_Number": "A51-2023",
-                "Project_Number": "EP-201
+                "Project_Number": "EP-201",
                 "Revision_Number": 0,
                 "Scale": "A1 : 1/100, A3 : 1/200",
                 "Architects": ["Unknown"],
