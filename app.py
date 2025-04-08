@@ -386,7 +386,8 @@ def run_streamlit():
                     img_path = doc.metadata.get("drawing_path", "")
                     if img_path and os.path.exists(img_path):
                         st.image(Image.open(img_path), caption=f"Image for {drawing}", width=400)
-
+            except Exception as e:
+                st.error(f"Error during retrieval: {e}")
         else:
             st.error("No vector database or retriever available. Please process the PDF first.")
 
