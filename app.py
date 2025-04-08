@@ -25,7 +25,7 @@ from nltk.tokenize import word_tokenize
 import torch
 import nltk
 from google import genai
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # Download required NLTK resource if needed.
 try:
@@ -62,36 +62,59 @@ if "processed" not in st.session_state:
     st.session_state.compression_retriever = None
 
 # -------------------------
-# Pipeline Functions
+# PDF to Image Conversion (Optimized)
 # -------------------------
-def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
+
+# Async function for PDF to Image Conversion
+async def pdf_to_images_async(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         log_message(f"Created directory: {output_dir}")
+
     try:
         doc = fitz.open(pdf_path)
     except Exception as e:
         log_message(f"Error opening PDF: {e}")
         raise
 
-    file_paths = []
-    for i in range(len(doc)):
-        page = doc[i]
-        scale = fixed_length / page.rect.width
-        matrix = fitz.Matrix(scale, scale)
-        pix = page.get_pixmap(matrix=matrix)
-        image_filename = f"{base_name}_page_{i + 1}.jpg"
-        image_path = os.path.join(output_dir, image_filename)
-        pix.save(image_path)
-        log_message(f"Saved image: {image_path}")
-        file_paths.append(image_path)
+    futures = []
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Process each page in parallel
+        for i in range(len(doc)):
+            futures.append(executor.submit(process_page_async, doc, i, base_name, output_dir, fixed_length))
+
+    # Wait for all page processing to complete
+    file_paths = [future.result() for future in futures]
     doc.close()
+
     log_message("PDF conversion completed.")
     return file_paths
+
+# Helper function to process each page asynchronously
+def process_page_async(doc, page_number, base_name, output_dir, fixed_length):
+    page = doc.load_page(page_number)
+    scale = fixed_length / page.rect.width
+    matrix = fitz.Matrix(scale, scale)
+    pix = page.get_pixmap(matrix=matrix)
+    image_filename = f"{base_name}_page_{page_number + 1}.jpg"
+    image_path = os.path.join(output_dir, image_filename)
+    pix.save(image_path)
+    log_message(f"Saved image: {image_path}")
+    return image_path
+
+# The main function for PDF to Image conversion
+def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
+    file_paths = asyncio.run(pdf_to_images_async(pdf_path, output_dir, fixed_length))
+    return file_paths
+
+# -------------------------
+# Block Detection
+# -------------------------
 
 class BlockDetectionModel:
     def __init__(self, weight, device=None):
@@ -113,6 +136,10 @@ class BlockDetectionModel:
             output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
         log_message("Block detection completed.")
         return output
+
+# -------------------------
+# Cropping Detected Regions
+# -------------------------
 
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
@@ -152,12 +179,15 @@ def crop_and_save(detection_output, output_dir):
     log_message("Cropping completed.")
     return output_data
 
-# Optimized Async function for Gemini OCR
+# -------------------------
+# Asynchronous Gemini OCR
+# -------------------------
+
 async def process_with_gemini_async(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
     contents = [prompt]
     
-    # Prepare the images to send to Gemini concurrently
+    # Prepare images to send to Gemini
     tasks = []
     for path in image_paths:
         tasks.append(process_image_async(path, contents))
@@ -190,6 +220,10 @@ async def process_image_async(image_path, contents):
     except Exception as e:
         log_message(f"Error opening {image_path}: {e}")
         return
+
+# -------------------------
+# Main Pipeline
+# -------------------------
 
 def process_page_with_metadata(page_key, blocks, prompt):
     log_message(f"Processing page: {page_key}")
@@ -226,6 +260,7 @@ def process_all_pages(data, prompt):
 # -------------------------
 # UI Layout
 # -------------------------
+
 st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
