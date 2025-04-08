@@ -345,27 +345,48 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
-# Add a separate button for downloading the vector store after processing
 if st.session_state.processed:
+    # Add the option for the user to specify a name for the vector store
     st.subheader("Download Vector Store")
-    file_name = "vector_store.pkl"
+
+    # Text input for the user to specify the name of the vector database
+    file_name = st.text_input("Enter a name for the Vector Store:", "faiss_index")  # Default name is "faiss_index"
+    
+    # Full path for saving the vector store
     vectorstore_path = os.path.join(DATA_DIR, file_name)
 
     # Save the vector store after processing
     if st.button("Save and Download Vector Store"):
         os.makedirs(DATA_DIR, exist_ok=True)
-        st.session_state.vector_store.save_local(vectorstore_path)  # Save to session state
-
-        # Provide the file for download
+        
+        # Save the vector store to the specified path
+        st.session_state.vector_store.save_local(vectorstore_path)
+        
+        # Provide the file for download with the chosen name
         with open(vectorstore_path, "rb") as f:
             st.download_button(
                 label="Download Vector Store",
                 data=f,
-                file_name=file_name,
+                file_name=f"{file_name}.pkl",  # Use the user-defined name with the .pkl extension
                 mime="application/octet-stream"
             )
 
-# Search functionality
+# ------
+
+# Loading the Vector Store with User-defined Name (before search)
+if uploaded_vectorstore:
+    # Get the file name from the user-uploaded vector store file
+    file_name = uploaded_vectorstore.name.split('.')[0]  # Remove the extension if any
+    
+    # Full path to load the vector store
+    vectorstore_path = os.path.join(DATA_DIR, file_name)
+
+    # Load the vector store with embeddings
+    st.session_state.vector_store = FAISS.load_local(vectorstore_path, embeddings)
+    st.sidebar.success(f"Vector store '{file_name}' loaded successfully.")
+    
+# ------
+# Search functionality (after loading vector store)
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
