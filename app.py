@@ -20,11 +20,17 @@ from langchain.retrievers.contextual_compression import ContextualCompressionRet
 from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
-import nltk
 import streamlit as st
 from prompts import OCR_PROMPT
 from google import genai
 
+import nltk
+
+# Download NLTK resources (punkt tokenizer)
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt', quiet=True)
 # Asyncio setup to allow async calls
 nest_asyncio.apply()
 
