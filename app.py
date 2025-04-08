@@ -258,19 +258,32 @@ def process_all_pages(data, prompt):
     return documents
 
 # -------------------------
-# UI Layout
+# UI Layout (Including the New Buttons)
 # -------------------------
 
 st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
-if uploaded_pdf:
+# New button to upload the vector store instead of PDF
+uploaded_vector_store = st.sidebar.file_uploader("Upload Vector Store", type=["json"])
+
+# If the user uploads the PDF
+if uploaded_pdf and not uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
     st.sidebar.success("PDF uploaded successfully.")
 
+# If the user uploads the vector store
+if uploaded_vector_store:
+    vector_store_path = os.path.join(DATA_DIR, uploaded_vector_store.name)
+    with open(vector_store_path, "wb") as f:
+        f.write(uploaded_vector_store.getbuffer())
+    st.sidebar.success("Vector store uploaded successfully.")
+    st.session_state.vector_store = FAISS.load_local(vector_store_path, OpenAIEmbeddings())
+
+# Button to run the entire processing pipeline
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
@@ -336,3 +349,35 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.vector_store = vector_store
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
+
+# New button to download the vector store
+if st.session_state.processed:
+    if st.sidebar.button("Download Vector Store"):
+        vector_store_path = os.path.join(DATA_DIR, "vector_store.json")
+        # Save the vector store to a file
+        st.session_state.vector_store.save_local(vector_store_path)
+        with open(vector_store_path, "rb") as f:
+            st.download_button(label="Download Vector Store", data=f, file_name="vector_store.json")
+
+st.title("Chat Interface")
+st.info("Enter your query below to search the processed PDF data.")
+query = st.text_input("Query:")
+if query and st.session_state.processed:
+    st.write("Searching...")
+    try:
+        results = st.session_state.compression_retriever.invoke(query)
+        st.markdown("### Retrieved Documents:")
+        for doc in results:
+            drawing = doc.metadata.get("drawing_name", "Unknown")
+            st.write(f"**Drawing:** {drawing}")
+            try:
+                st.json(json.loads(doc.page_content))
+            except Exception:
+                st.write(doc.page_content)
+            img_path = doc.metadata.get("drawing_path", "")
+            if img_path and os.path.exists(img_path):
+                st.image(Image.open(img_path), width=400)
+    except Exception as e:
+        st.error(f"Search failed: {e}")
+
+st.write("Streamlit app finished processing.")
