@@ -363,7 +363,7 @@ if st.session_state.processed:
         st.session_state.vector_store.save_local(vectorstore_path)
         
         # Provide the file for download with the chosen name
-        with open(vectorstore_path, "rb") as f:
+        with open(vectorstore_path+".pkl", "rb") as f:
             st.download_button(
                 label="Download Vector Store",
                 data=f,
