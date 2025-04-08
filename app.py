@@ -221,6 +221,7 @@ def process_all_pages(data, prompt):
             log_message(f"No document returned for {key}")
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
+
 # -------------------------
 # UI Layout
 # -------------------------
@@ -347,10 +348,15 @@ if uploaded_pdf and not st.session_state.processed:
         
         # Ask user to specify a custom filename for download
         file_name = st.text_input("Enter a name for the vector store file:", "vector_store.pkl")
+        
+        # Ensure directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)
 
         def save_vector_store():
+            # Save the vector store to a file
             vectorstore_path = os.path.join(DATA_DIR, file_name)
             vector_store.save_local(vectorstore_path)
+            # Provide the file for download
             with open(vectorstore_path, "rb") as f:
                 st.download_button(
                     label="Download Vector Store",
