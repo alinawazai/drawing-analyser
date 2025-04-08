@@ -9,5 +9,6 @@ rank_bm25
 nltk
 Pillow
 google-genai
+nest_asyncio
 python-dotenv
 PyMuPDF
