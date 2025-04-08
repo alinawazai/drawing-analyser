@@ -8,6 +8,6 @@ langchain-cohere
 rank_bm25
 nltk
 Pillow
-google-generativeai
+google-genai
 python-dotenv
 PyMuPDF
