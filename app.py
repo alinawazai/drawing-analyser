@@ -53,6 +53,7 @@ if "processed" not in st.session_state:
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
+    st.session_state.vector_db_path = None  # Store path for uploaded vector database
 
 # Asynchronous PDF to Images Conversion
 async def pdf_to_images_async(pdf_path, output_dir, fixed_length=1080):
@@ -322,6 +323,7 @@ def save_vector_db(vector_store):
         vector_db_path = os.path.join(DATA_DIR, "vector_db_index.faiss")
         faiss.write_index(vector_store.index, vector_db_path)
         st.session_state.vector_db_saved = True
+        st.session_state.vector_db_path = vector_db_path  # Save the path for future download
         st.sidebar.success("Vector database saved successfully.")
     except Exception as e:
         st.sidebar.error(f"Failed to save Vector Database: {e}")
@@ -330,6 +332,15 @@ def save_vector_db(vector_store):
 def run_streamlit():
     st.sidebar.title("PDF Processing")
     uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
+
+    # Upload existing vector database
+    uploaded_vector_db = st.sidebar.file_uploader("Upload Vector Database", type=["faiss"])
+    if uploaded_vector_db:
+        vector_db_path = os.path.join(DATA_DIR, uploaded_vector_db.name)
+        with open(vector_db_path, "wb") as f:
+            f.write(uploaded_vector_db.getbuffer())
+        st.sidebar.success("Vector Database uploaded successfully.")
+        st.session_state.vector_db_path = vector_db_path
 
     if uploaded_pdf:
         os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
@@ -347,6 +358,37 @@ def run_streamlit():
     # Option to save the vector database after processing is done
     if st.session_state.processed and st.sidebar.button("Save Vector Database"):
         save_vector_db(st.session_state.vector_store)
+
+    # Option to download the vector database
+    if st.session_state.vector_db_path and st.session_state.vector_db_saved:
+        st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
+
+    # Adding Query Text Box for Searching
+    query = st.text_input("Enter your query here:")
+
+    if query:
+        # Perform the retrieval from the vector store
+        log_message("Performing search query...")
+
+        if st.session_state.vector_store and st.session_state.compression_retriever:
+            try:
+                results = st.session_state.compression_retriever.invoke(query)
+                st.markdown("### Retrieved Documents:")
+
+                for doc in results:
+                    drawing = doc.metadata.get("drawing_name", "Unknown")
+                    st.write(f"**Drawing:** {drawing}")
+                    try:
+                        st.json(json.loads(doc.page_content))  # Display content in JSON format
+                    except Exception:
+                        st.write(doc.page_content)  # Fallback if JSON parsing fails
+
+                    img_path = doc.metadata.get("drawing_path", "")
+                    if img_path and os.path.exists(img_path):
+                        st.image(Image.open(img_path), caption=f"Image for {drawing}", width=400)
+
+        else:
+            st.error("No vector database or retriever available. Please process the PDF first.")
 
 # Execute Streamlit UI
 run_streamlit()
