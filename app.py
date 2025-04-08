@@ -3,10 +3,8 @@ nest_asyncio.apply()
 
 import asyncio
 import os
-import glob
 import json
 import logging
-import concurrent.futures
 from uuid import uuid4
 from dotenv import load_dotenv
 import streamlit as st
@@ -26,6 +24,7 @@ from nltk.tokenize import word_tokenize
 import torch
 import nltk
 from google import genai
+client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 # Download required NLTK resource if needed.
 try:
@@ -35,12 +34,6 @@ except LookupError:
         nltk.download('punkt_tab', quiet=True)
     except FileExistsError:
         pass
-
-# Load environment variables
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
 # Directory structure (adjust as needed)
 DATA_DIR = "data"
@@ -60,18 +53,22 @@ if "processed" not in st.session_state:
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
-client = genai.Client(api_key=GEMINI_API_KEY)
+
 # -------------------------
-# Pipeline Functions
+# PDF to Image Conversion (Simplified)
 # -------------------------
+
+# Simplified function for PDF to Image Conversion
 def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         log_message(f"Created directory: {output_dir}")
+
     try:
         doc = fitz.open(pdf_path)
     except Exception as e:
@@ -80,7 +77,7 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
 
     file_paths = []
     for i in range(len(doc)):
-        page = doc[i]
+        page = doc.load_page(i)
         scale = fixed_length / page.rect.width
         matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=matrix)
@@ -89,9 +86,14 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         pix.save(image_path)
         log_message(f"Saved image: {image_path}")
         file_paths.append(image_path)
+
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
+
+# -------------------------
+# Block Detection
+# -------------------------
 
 class BlockDetectionModel:
     def __init__(self, weight, device=None):
@@ -113,6 +115,10 @@ class BlockDetectionModel:
             output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
         log_message("Block detection completed.")
         return output
+
+# -------------------------
+# Cropping Detected Regions
+# -------------------------
 
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
@@ -152,19 +158,24 @@ def crop_and_save(detection_output, output_dir):
     log_message("Cropping completed.")
     return output_data
 
-# Optimized Async function for Gemini OCR
+# -------------------------
+# Asynchronous Gemini OCR
+# -------------------------
+
 async def process_with_gemini_async(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
     contents = [prompt]
     
-    # Prepare the images to send to Gemini concurrently
-    tasks = []
+    # Prepare the images to send to Gemini
     for path in image_paths:
-        tasks.append(process_image_async(path, contents))
+        try:
+            with Image.open(path) as img:
+                img_resized = img.resize((int(img.width / 2), int(img.height / 2)))
+                contents.append(img_resized)
+        except Exception as e:
+            log_message(f"Error opening {path}: {e}")
+            continue
     
-    # Wait for all image processes to finish
-    await asyncio.gather(*tasks)
-
     # Call the Gemini API to process the images
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
@@ -181,15 +192,9 @@ async def process_with_gemini_async(image_paths, prompt):
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
 
-# Helper function to process individual images asynchronously
-async def process_image_async(image_path, contents):
-    try:
-        with Image.open(image_path) as img:
-            img_resized = img.resize((int(img.width / 2), int(img.height / 2)))
-            contents.append(img_resized)
-    except Exception as e:
-        log_message(f"Error opening {image_path}: {e}")
-        return
+# -------------------------
+# Main Pipeline
+# -------------------------
 
 def process_page_with_metadata(page_key, blocks, prompt):
     log_message(f"Processing page: {page_key}")
@@ -224,28 +229,39 @@ def process_all_pages(data, prompt):
     return documents
 
 # -------------------------
-# UI Layout
+# UI Layout (Including the New Buttons)
 # -------------------------
-st.sidebar.title("PDF Processing")
-uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
-if uploaded_pdf:
+st.sidebar.title("PDF Processing")
+
+# New button to upload the vector store instead of PDF
+uploaded_vector_store = st.sidebar.file_uploader("Upload Vector Store", type=["json"])
+
+# If the user uploads the PDF
+if uploaded_pdf and not uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
     st.sidebar.success("PDF uploaded successfully.")
 
+# If the user uploads the vector store
+if uploaded_vector_store:
+    vector_store_path = os.path.join(DATA_DIR, uploaded_vector_store.name)
+    with open(vector_store_path, "wb") as f:
+        f.write(uploaded_vector_store.getbuffer())
+    st.sidebar.success("Vector store uploaded successfully.")
+    # Load the vector store from the uploaded file
+    st.session_state.vector_store = FAISS.load_local(vector_store_path, OpenAIEmbeddings())
+
+# Button to run the entire processing pipeline
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
         log_message("Converting PDF to images sequentially...")
         # Run low-res and high-res conversions concurrently.
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_low = executor.submit(pdf_to_images, pdf_path, LOW_RES_DIR, 662)
-            future_high = executor.submit(pdf_to_images, pdf_path, HIGH_RES_DIR, 4000)
-            low_res_paths = future_low.result()
-            high_res_paths = future_high.result()
+        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
+        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
         log_message("PDF conversion completed.")
 
         log_message("Running YOLO detection on low-res images...")
@@ -301,3 +317,35 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.vector_store = vector_store
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
+
+# New button to download the vector store
+if st.session_state.processed:
+    if st.sidebar.button("Download Vector Store"):
+        vector_store_path = os.path.join(DATA_DIR, "vector_store.json")
+        # Save the vector store to a file
+        st.session_state.vector_store.save_local(vector_store_path)
+        with open(vector_store_path, "rb") as f:
+            st.download_button(label="Download Vector Store", data=f, file_name="vector_store.json")
+
+st.title("Chat Interface")
+st.info("Enter your query below to search the processed PDF data.")
+query = st.text_input("Query:")
+if query and st.session_state.processed:
+    st.write("Searching...")
+    try:
+        results = st.session_state.compression_retriever.invoke(query)
+        st.markdown("### Retrieved Documents:")
+        for doc in results:
+            drawing = doc.metadata.get("drawing_name", "Unknown")
+            st.write(f"**Drawing:** {drawing}")
+            try:
+                st.json(json.loads(doc.page_content))
+            except Exception:
+                st.write(doc.page_content)
+            img_path = doc.metadata.get("drawing_path", "")
+            if img_path and os.path.exists(img_path):
+                st.image(Image.open(img_path), width=400)
+    except Exception as e:
+        st.error(f"Search failed: {e}")
+
+st.write("Streamlit app finished processing.")
