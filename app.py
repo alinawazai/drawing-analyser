@@ -2,18 +2,11 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import asyncio
-# Ensure an active event loop exists.
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
 import os
-import json
-import time
 import glob
+import json
 import logging
+import concurrent.futures
 from uuid import uuid4
 from dotenv import load_dotenv
 import streamlit as st
@@ -33,7 +26,6 @@ from nltk.tokenize import word_tokenize
 import torch
 import nltk
 from google import genai
-
 
 # Download required NLTK resource if needed.
 try:
@@ -55,7 +47,7 @@ DATA_DIR = "data"
 LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
 HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
-client = genai.Client(api_key=GEMINI_API_KEY)
+
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -68,7 +60,7 @@ if "processed" not in st.session_state:
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
-
+client = genai.Client(api_key=GEMINI_API_KEY)
 # -------------------------
 # Pipeline Functions
 # -------------------------
