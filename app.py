@@ -3,6 +3,7 @@ import json
 import time
 import glob
 import logging
+import concurrent.futures
 from uuid import uuid4
 from dotenv import load_dotenv
 import streamlit as st
@@ -71,17 +72,19 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     except Exception as e:
         log_message(f"Error opening PDF: {e}")
         raise
-    file_paths = []
-    for i in range(len(doc)):
-        page = doc[i]
+    def process_page(page_number):
+        page = doc[page_number]
         scale = fixed_length / page.rect.width
         matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=matrix)
-        image_filename = f"{base_name}_page_{i + 1}.jpg"
+        image_filename = f"{base_name}_page_{page_number + 1}.jpg"
         image_path = os.path.join(output_dir, image_filename)
         pix.save(image_path)
         log_message(f"Saved image: {image_path}")
-        file_paths.append(image_path)
+        return image_path
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_page, i) for i in range(len(doc))]
+        file_paths = [future.result() for future in concurrent.futures.as_completed(futures)]
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
@@ -106,6 +109,11 @@ class BlockDetectionModel:
             output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
         log_message("Block detection completed.")
         return output
+
+def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
+    scale_x = dst_size[0] / src_size[0]
+    scale_y = scale_x
+    return bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y
 
 def crop_and_save(detection_output, output_dir):
     log_message("Cropping detected regions using high-res images...")
@@ -191,13 +199,19 @@ def process_page_with_metadata(page_key, blocks, prompt):
 
 def process_all_pages(data, prompt):
     documents = []
-    for key, blocks in data.items():
-        doc = process_page_with_metadata(key, blocks, prompt)
-        if doc:
-            documents.append(doc)
-        else:
-            log_message(f"No document returned for {key}")
-    log_message(f"Total {len(documents)} documents processed.")
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(process_page_with_metadata, key, blocks, prompt): key for key, blocks in data.items()}
+        for future in concurrent.futures.as_completed(futures):
+            key = futures[future]
+            try:
+                doc = future.result()
+                if doc:
+                    documents.append(doc)
+                else:
+                    log_message(f"No document returned for {key}")
+            except Exception as e:
+                log_message(f"Error processing {key}: {e}")
+    log_message(f"Total {len(documents)} documents processed asynchronously.")
     return documents
 
 # -------------------------
@@ -217,9 +231,13 @@ if uploaded_pdf:
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
-        log_message("Converting PDF to images...")
-        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
-        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
+        log_message("Converting PDF to images concurrently...")
+        # Run low-res and high-res conversions concurrently
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_low = executor.submit(pdf_to_images, pdf_path, LOW_RES_DIR, 662)
+            future_high = executor.submit(pdf_to_images, pdf_path, HIGH_RES_DIR, 4000)
+            low_res_paths = future_low.result()
+            high_res_paths = future_high.result()
         log_message("PDF conversion completed.")
 
         log_message("Running YOLO detection on low-res images...")
@@ -233,9 +251,47 @@ if uploaded_pdf and not st.session_state.processed:
 
         ocr_prompt = """
             You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
-            (The rest of the prompt remains the same)
-        """
-        log_message("Extracting metadata using Gemini OCR...")
+            Within the images you receive, there will be details pertaining to a single construction drawing.
+            Your job is to identify and extract exactly below fields from this text:
+            - 1st image has details about the drawing_title and scale
+            - 2nd Image has details about the client or project
+            - 4th Images has Notes
+            - 3rd Images has rest of the informations
+            - last image is the full image from which the above image are cropped
+            1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
+            2. Client_Name
+            3. Project_Title
+            4. Drawing_Title
+            5. Floor
+            6. Drawing_Number
+            7. Project_Number
+            8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
+            9. Scale
+            10. Architects (list of names; use ['Unknown'] if no names are identified)
+            11. Notes_on_Drawing (any remarks or additional details related to the drawing)
+
+            Key Requirements:
+            - If any field is missing, return an empty string ('') or 'N/A' for that field.
+            - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
+            - Preserve all text in its original language (no translation), apart from minimal cleaning (e.g., removing stray punctuation) if truly necessary.
+            - Do not wrap the final JSON in code fences.
+            - Return ONLY the final JSON object with these fields and no additional commentary.
+            Below is an example json format:
+            {{
+                "Purpose_Type_of_Drawing": "Architectural",
+                "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
+                "Project_Title": "문촌주공아파트  주택재건축정비사업",
+                "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
+                "Floor": "주단면도-3",
+                "Drawing_Number": "A51-2023",
+                "Project_Number": "EP-201
+                "Revision_Number": 0,
+                "Scale": "A1 : 1/100, A3 : 1/200",
+                "Architects": ["Unknown"],
+                "Notes_on_Drawing": "• 욕상 줄눈의 간격 등은 실시공 시 변경될 수 있음.\\n• 욕상 출눈 틈에는 실란트가 시공되지 않음.\\n• 지붕의 재료, 형태, 구조는 실시공 시 변경될 수 있음.\\n• 지붕층 난간의 형태와 설치 위치는 안전성, 입면, 디자인을 고려하여 변경 가능함.\\n• 단열재의 종류는 단열성능 관계 내역을 참조.\\n• 도면상 표기된 욕상 및 지하의 무근 콘크리트 두께는 평균 두께를 의미하며, 본 시공 시 구배를 고려하여 두께가 증감될 수 있음.\\n• 외벽 단열 부분과 환기 덕트가 연결되는 부위는 기밀하게 마감해야 함."
+            }}
+            """
+        log_message("Extracting metadata using Gemini OCR asynchronously...")
         gemini_documents = process_all_pages(cropped_data, ocr_prompt)
         log_message("Metadata extraction completed.")
         gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
@@ -276,3 +332,27 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.vector_store = vector_store
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
+
+# Main area: Chat Interface for Query Search
+st.title("Chat Interface")
+st.info("Enter your query below to search the processed PDF data.")
+query = st.text_input("Query:")
+if query and st.session_state.processed:
+    st.write("Searching...")
+    try:
+        results = st.session_state.compression_retriever.invoke(query)
+        st.markdown("### Retrieved Documents:")
+        for doc in results:
+            drawing = doc.metadata.get("drawing_name", "Unknown")
+            st.write(f"**Drawing:** {drawing}")
+            try:
+                st.json(json.loads(doc.page_content))
+            except Exception:
+                st.write(doc.page_content)
+            img_path = doc.metadata.get("drawing_path", "")
+            if img_path and os.path.exists(img_path):
+                st.image(Image.open(img_path), width=400)
+    except Exception as e:
+        st.error(f"Search failed: {e}")
+
+st.write("Streamlit app finished processing.")
