@@ -57,7 +57,8 @@ DATA_DIR = "data"
 LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
 HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
-
+from google import genai
+client = genai.Client(api_key=GEMINI_API_KEY)
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -187,9 +188,8 @@ def process_with_gemini(image_paths, prompt):
                 contents.append(img_resized)
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
-    from google import genai
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    time.sleep(4)  # Simple rate-limiting
+
+    # time.sleep(4)  # Simple rate-limiting
     response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
