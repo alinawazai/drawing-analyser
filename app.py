@@ -34,6 +34,7 @@ import torch
 import nltk
 from google import genai
 client = genai.Client(api_key=GEMINI_API_KEY)
+
 # Download required NLTK resource if needed.
 try:
     nltk.data.find('tokenizers/punkt_tab')
@@ -44,22 +45,17 @@ except LookupError:
         pass
 
 # Load environment variables
-# load_dotenv()
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# COHERE_API_KEY = os.getenv("COHERE_API_KEY")
-# Use Streamlit secrets for API keys
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
 # Directory structure (adjust as needed)
 DATA_DIR = "data"
 LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
 HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
-from google import genai
-client = genai.Client(api_key=GEMINI_API_KEY)
+
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -74,9 +70,8 @@ if "processed" not in st.session_state:
     st.session_state.compression_retriever = None
 
 # -------------------------
-# Pipeline Functions (Sequential Version)
+# Pipeline Functions
 # -------------------------
-
 def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
     if not os.path.exists(pdf_path):
@@ -85,27 +80,24 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         log_message(f"Created directory: {output_dir}")
-
     try:
         doc = fitz.open(pdf_path)
     except Exception as e:
         log_message(f"Error opening PDF: {e}")
         raise
-
-    file_paths = []
-    # Optional: Limit number of pages (e.g., process only first 10 pages) 
-    # max_pages = min(len(doc), 10)
-    # for i in range(max_pages):
-    for i in range(len(doc)):
-        page = doc[i]
+    def process_page(page_number):
+        page = doc[page_number]
         scale = fixed_length / page.rect.width
         matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=matrix)
-        image_filename = f"{base_name}_page_{i + 1}.jpg"
+        image_filename = f"{base_name}_page_{page_number + 1}.jpg"
         image_path = os.path.join(output_dir, image_filename)
         pix.save(image_path)
         log_message(f"Saved image: {image_path}")
-        file_paths.append(image_path)
+        return image_path
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_page, i) for i in range(len(doc))]
+        file_paths = [future.result() for future in concurrent.futures.as_completed(futures)]
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
@@ -121,24 +113,15 @@ class BlockDetectionModel:
             raise ValueError(f"Directory {images_dir} is empty or does not exist.")
         images = glob.glob(os.path.join(images_dir, "*.jpg"))
         log_message(f"Found {len(images)} low-res images for detection.")
-        
+        results = self.model(images)
         output = {}
-        batch_size = 10  # Process 10 images at a time
-        
-        # Process images in batches of 10
-        for i in range(0, len(images), batch_size):
-            batch = images[i:i + batch_size]
-            log_message(f"Processing images {i + 1} to {min(i + batch_size, len(images))} of {len(images)}.")
-            results = self.model(batch)
-            for result in results:
-                image_name = os.path.basename(result.path)
-                labels = result.boxes.cls.tolist()
-                boxes = result.boxes.xywh.tolist()
-                output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
-        
+        for result in results:
+            image_name = os.path.basename(result.path)
+            labels = result.boxes.cls.tolist()
+            boxes = result.boxes.xywh.tolist()
+            output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
         log_message("Block detection completed.")
         return output
-
 
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
@@ -178,10 +161,12 @@ def crop_and_save(detection_output, output_dir):
     log_message("Cropping completed.")
     return output_data
 
-def process_with_gemini(image_paths, prompt):
-    log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
-    # Even though this step is originally asynchronous, processing sequentially reduces load.
+# Async function for Gemini OCR
+async def process_with_gemini_async(image_paths, prompt):
+    log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
     contents = [prompt]
+    
+    # Prepare the images to send to Gemini
     for path in image_paths:
         try:
             with Image.open(path) as img:
@@ -189,18 +174,18 @@ def process_with_gemini(image_paths, prompt):
                 contents.append(img_resized)
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
-<<<<<<< HEAD
-=======
-
-    # time.sleep(4)  # Simple rate-limiting
->>>>>>> 898073d96da32db55a90755d0fc9045e1c365e57
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
+            continue
+    
+    # Call the Gemini API to process the images
+    response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
+    
+    # Get the response text and clean it up by removing Markdown code block markers
     resp_text = response.text.strip()
-    if resp_text.startswith("```"):
-        resp_text = resp_text.replace("```", "").strip()
-        if resp_text.lower().startswith("json"):
-            resp_text = resp_text[4:].strip()
+    if resp_text.startswith("```json"):
+        resp_text = resp_text.replace("```json", "").replace("```", "").strip()
+    
+    # Try parsing the cleaned-up response as JSON
     try:
         return json.loads(resp_text)
     except json.JSONDecodeError:
@@ -216,7 +201,7 @@ def process_page_with_metadata(page_key, blocks, prompt):
     if not all_imgs:
         log_message(f"No cropped images for {page_key}")
         return None
-    raw_metadata = process_with_gemini(all_imgs, prompt)
+    raw_metadata = asyncio.run(process_with_gemini_async(all_imgs, prompt))  # Using async function
     if raw_metadata:
         doc = Document(
             page_content=json.dumps(raw_metadata),
@@ -243,7 +228,8 @@ def process_all_pages(data, prompt):
 # UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
-# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
+# IMPORTANT: It is recommended to disable Streamlit's file watcher in your deployment
+# by adding a file named `.streamlit/config.toml` with:
 # [server]
 # fileWatcherType = "none"
 
@@ -259,10 +245,13 @@ if uploaded_pdf:
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
-
-        log_message("Converting PDF to images sequentially...")
-        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
-        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
+        log_message("Converting PDF to images concurrently...")
+        # Run low-res and high-res conversions concurrently.
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_low = executor.submit(pdf_to_images, pdf_path, LOW_RES_DIR, 662)
+            future_high = executor.submit(pdf_to_images, pdf_path, HIGH_RES_DIR, 4000)
+            low_res_paths = future_low.result()
+            high_res_paths = future_high.result()
         log_message("PDF conversion completed.")
 
         log_message("Running YOLO detection on low-res images...")
@@ -294,7 +283,7 @@ if uploaded_pdf and not st.session_state.processed:
             9. Scale
             10. Architects (list of names; use ['Unknown'] if no names are identified)
             11. Notes_on_Drawing (any remarks or additional details related to the drawing)
-            
+
             Key Requirements:
             - If any field is missing, return an empty string ('') or 'N/A' for that field.
             - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
@@ -316,7 +305,7 @@ if uploaded_pdf and not st.session_state.processed:
                 "Notes_on_Drawing": "Example notes here."
             }}
             """
-        log_message("Extracting metadata using Gemini OCR sequentially...")
+        log_message("Extracting metadata using Gemini OCR asynchronously...")
         gemini_documents = process_all_pages(cropped_data, ocr_prompt)
         log_message("Metadata extraction completed.")
         gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
@@ -341,42 +330,4 @@ if uploaded_pdf and not st.session_state.processed:
 
         log_message("Setting up retrievers...")
         bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
-        log_message("Setting up RAG pipeline...")
-        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
-        log_message("RAG pipeline set up.")
-        st.session_state.processed = True
-        st.session_state.gemini_documents = gemini_documents
-        st.session_state.vector_store = vector_store
-        st.session_state.compression_retriever = compression_retriever
-        log_message("Processing pipeline completed.")
-
-st.title("Chat Interface")
-st.info("Enter your query below to search the processed PDF data.")
-query = st.text_input("Query:")
-if query and st.session_state.processed:
-    st.write("Searching...")
-    try:
-        results = st.session_state.compression_retriever.invoke(query)
-        st.markdown("### Retrieved Documents:")
-        for doc in results:
-            drawing = doc.metadata.get("drawing_name", "Unknown")
-            st.write(f"**Drawing:** {drawing}")
-            try:
-                st.json(json.loads(doc.page_content))
-            except Exception:
-                st.write(doc.page_content)
-            img_path = doc.metadata.get("drawing_path", "")
-            if img_path and os.path.exists(img_path):
-                st.image(Image.open(img_path), width=400)
-    except Exception as e:
-        st.error(f"Search failed: {e}")
-
-st.write("Streamlit app finished processing.")
+        retriever_ss = vector_store
