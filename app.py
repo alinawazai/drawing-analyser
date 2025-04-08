@@ -189,6 +189,7 @@ async def process_with_gemini_async(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
     contents = [prompt]
     
+    # Prepare the images to send to Gemini
     for path in image_paths:
         try:
             with Image.open(path) as img:
@@ -198,15 +199,22 @@ async def process_with_gemini_async(image_paths, prompt):
             log_message(f"Error opening {path}: {e}")
             continue
     
+    # Call the Gemini API to process the images
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
+    
+    # Get the response text and clean it up by removing Markdown code block markers
     resp_text = response.text.strip()
-
+    if resp_text.startswith("```json"):
+        resp_text = resp_text.replace("```json", "").replace("```", "").strip()
+    
+    # Try parsing the cleaned-up response as JSON
     try:
         return json.loads(resp_text)
     except json.JSONDecodeError:
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
+
 
 # Process pages with metadata using Gemini OCR asynchronously
 async def process_all_pages_async(data, prompt):
