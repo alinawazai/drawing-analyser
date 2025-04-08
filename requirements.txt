@@ -11,3 +11,4 @@ Pillow
 google-generativeai
 python-dotenv
 PyMuPDF
+nest_asyncio
