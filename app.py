@@ -221,7 +221,6 @@ def process_all_pages(data, prompt):
             log_message(f"No document returned for {key}")
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
-
 # -------------------------
 # UI Layout
 # -------------------------
@@ -345,27 +344,26 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.vector_store = vector_store
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
-        
-        # Ask user to specify a custom filename for download
-        file_name = st.text_input("Enter a name for the vector store file:", "vector_store.pkl")
-        
-        # Ensure directory exists
-        os.makedirs(DATA_DIR, exist_ok=True)
 
-        def save_vector_store():
-            # Save the vector store to a file
-            vectorstore_path = os.path.join(DATA_DIR, file_name)
-            vector_store.save_local(vectorstore_path)
-            # Provide the file for download
-            with open(vectorstore_path, "rb") as f:
-                st.download_button(
-                    label="Download Vector Store",
-                    data=f,
-                    file_name=file_name,
-                    mime="application/octet-stream"
-                )
-        
-        save_vector_store()
+# Add a separate button for downloading the vector store after processing
+if st.session_state.processed:
+    st.subheader("Download Vector Store")
+    file_name = "vector_store.pkl"
+    vectorstore_path = os.path.join(DATA_DIR, file_name)
+
+    # Save the vector store after processing
+    if st.button("Save and Download Vector Store"):
+        os.makedirs(DATA_DIR, exist_ok=True)
+        vector_store.save_local(vectorstore_path)
+
+        # Provide the file for download
+        with open(vectorstore_path, "rb") as f:
+            st.download_button(
+                label="Download Vector Store",
+                data=f,
+                file_name=file_name,
+                mime="application/octet-stream"
+            )
 
 # Search functionality
 st.title("Chat Interface")
