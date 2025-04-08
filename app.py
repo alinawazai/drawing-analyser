@@ -1,11 +1,19 @@
 import nest_asyncio
 nest_asyncio.apply()
-import glob
+
 import asyncio
+# Ensure an active event loop exists.
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 import os
 import json
+import time
+import glob
 import logging
-import concurrent.futures
 from uuid import uuid4
 from dotenv import load_dotenv
 import streamlit as st
