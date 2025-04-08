@@ -371,8 +371,6 @@
 
 
 
-
-
 import os
 import json
 import time
@@ -380,6 +378,7 @@ import glob
 import logging
 import tempfile
 from uuid import uuid4
+from dotenv import load_dotenv
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
@@ -396,19 +395,20 @@ from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
 import nltk
-from prompts import OCR_PROMPT
-# Download required NLTK resource if needed.
+from prompts import OCR_PROMPT  # Import the OCR prompt
+
+# Initialize NLTK
 try:
     nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
     nltk.download('punkt_tab')
 
-# Load API keys from Streamlit secrets
+# Use Streamlit secrets for API keys
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
 
-# Create temporary directories for this session
+# Set up session state and temporary directories
 if "processed" not in st.session_state:
     st.session_state.processed = False
     st.session_state.gemini_documents = None
@@ -417,6 +417,7 @@ if "processed" not in st.session_state:
 if "logs" not in st.session_state:
     st.session_state.logs = []
 
+# Create temporary directories for this session
 if "base_dir" not in st.session_state:
     st.session_state.base_dir = tempfile.TemporaryDirectory()
 
@@ -436,6 +437,7 @@ def log_message(msg):
 # Pipeline Functions
 # -------------------------
 
+# Refactor PDF to images without async
 def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
     if not os.path.exists(pdf_path):
@@ -449,7 +451,8 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     except Exception as e:
         log_message(f"Error opening PDF: {e}")
         raise
-    def process_page(page_number):
+    file_paths = []
+    for page_number in range(len(doc)):
         page = doc[page_number]
         scale = fixed_length / page.rect.width
         matrix = fitz.Matrix(scale, scale)
@@ -458,14 +461,12 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         image_path = os.path.join(output_dir, image_filename)
         pix.save(image_path)
         log_message(f"Saved image: {image_path}")
-        return image_path
-    file_paths = []
-    for i in range(len(doc)):
-        file_paths.append(process_page(i))
+        file_paths.append(image_path)
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
 
+# Block Detection Model
 class BlockDetectionModel:
     def __init__(self, weight, device=None):
         self.device = "cuda" if (device is None and torch.cuda.is_available()) else "cpu"
@@ -487,11 +488,13 @@ class BlockDetectionModel:
         log_message("Block detection completed.")
         return output
 
+# Function to scale bounding boxes
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
     scale_y = scale_x
     return bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y
 
+# Cropping detected regions from images
 def crop_and_save(detection_output, output_dir):
     log_message("Cropping detected regions using high-res images...")
     output_data = {}
@@ -525,8 +528,9 @@ def crop_and_save(detection_output, output_dir):
     log_message("Cropping completed.")
     return output_data
 
+# Function to process images with Gemini OCR
 def process_with_gemini(image_paths, prompt):
-    log_message(f"Processing {len(image_paths)} images with Gemini OCR...")
+    log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
     contents = [prompt]
     for path in image_paths:
         try:
@@ -540,8 +544,9 @@ def process_with_gemini(image_paths, prompt):
     client = genai.Client(api_key=GEMINI_API_KEY)
     time.sleep(4)  # Simple rate-limiting
     response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
-    log_message("Gemini OCR response received.")
+    log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
+    # Remove code fences if present
     if resp_text.startswith("```"):
         resp_text = resp_text.replace("```", "").strip()
         if resp_text.lower().startswith("json"):
@@ -552,6 +557,7 @@ def process_with_gemini(image_paths, prompt):
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
 
+# Function to process pages with metadata
 def process_page_with_metadata(page_key, blocks, prompt):
     log_message(f"Processing page: {page_key}")
     all_imgs = []
@@ -575,93 +581,103 @@ def process_page_with_metadata(page_key, blocks, prompt):
 
 def process_all_pages(data, prompt):
     documents = []
-    for key, blocks in data.items():
-        doc = process_page_with_metadata(key, blocks, prompt)
-        if doc:
+    for page_key, blocks in data.items():
+        log_message(f"Processing page: {page_key}")
+        all_imgs = []
+        for block_type, paths in blocks.items():
+            if block_type != "Image_Path":
+                all_imgs.extend(paths)
+        if not all_imgs:
+            log_message(f"No cropped images for {page_key}")
+            continue
+        
+        # Process the page and extract metadata
+        raw_metadata = process_with_gemini(all_imgs, prompt)
+        if raw_metadata:
+            doc = Document(
+                page_content=json.dumps(raw_metadata),
+                metadata={"drawing_path": blocks["Image_Path"], "drawing_name": page_key, "content": "everything"}
+            )
+            log_message(f"Document created for {page_key}")
             documents.append(doc)
+        else:
+            log_message(f"No metadata extracted for {page_key}")
     log_message(f"Total {len(documents)} documents processed.")
     return documents
+
+# Main function to process the PDF and extract metadata
+def process_pdf(uploaded_pdf):
+    pdf_path = os.path.join(BASE_DIR, uploaded_pdf.name)
+    with open(pdf_path, "wb") as f:
+        f.write(uploaded_pdf.getbuffer())
+    st.sidebar.success("PDF uploaded successfully.")
+    
+    log_message("Converting PDF to images...")
+    low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
+    high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
+    
+    log_message("Running YOLO detection on low-res images...")
+    yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
+    detection_results = yolo_model.predict_batch(LOW_RES_DIR)
+    
+    log_message("Cropping detected regions using high-res images...")
+    cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
+    
+    log_message("Extracting metadata using Gemini OCR...")
+    gemini_documents = process_all_pages(cropped_data, OCR_PROMPT)
+    
+    gemini_json_path = os.path.join(BASE_DIR, "gemini_documents.json")
+    with open(gemini_json_path, "w") as f:
+        json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
+    
+    log_message("Building vector store for semantic search...")
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    example_embedding = embeddings.embed_query("sample text")
+    d = len(example_embedding)
+    index = faiss.IndexFlatL2(d)
+    vector_store = FAISS(
+        embedding_function=embeddings,
+        index=index,
+        docstore=InMemoryDocstore(),
+        index_to_docstore_id={}
+    )
+    uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
+    vector_store.add_documents(documents=gemini_documents, ids=uuids)
+    
+    log_message("Setting up retrievers...")
+    bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
+    retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, retriever_ss],
+        weights=[0.6, 0.4]
+    )
+    
+    log_message("Setting up RAG pipeline...")
+    compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, base_retriever=ensemble_retriever
+    )
+    
+    st.session_state.processed = True
+    st.session_state.gemini_documents = gemini_documents
+    st.session_state.vector_store = vector_store
+    st.session_state.compression_retriever = compression_retriever
+    
+    log_message("Processing pipeline completed.")
 
 # -------------------------
 # UI Layout
 # -------------------------
 
-st.sidebar.title("PDF Processing")
+# File uploader
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
-
-if uploaded_pdf:
-    pdf_path = os.path.join(BASE_DIR, uploaded_pdf.name)
-    with open(pdf_path, "wb") as f:
-        f.write(uploaded_pdf.getbuffer())
-    st.sidebar.success("PDF uploaded successfully.")
-
-# Button to run the entire processing pipeline
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
-        log_message("PDF uploaded successfully.")
-        log_message("Converting PDF to images...")
-        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
-        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
-        log_message("PDF conversion completed.")
+        process_pdf(uploaded_pdf)
 
-        log_message("Running YOLO detection on low-res images...")
-        yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
-        detection_results = yolo_model.predict_batch(LOW_RES_DIR)
-        log_message("Block detection completed.")
-
-        log_message("Cropping detected regions using high-res images...")
-        cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
-        log_message("Cropping completed.")
-
-        ocr_prompt = OCR_PROMPT
-        log_message("Extracting metadata using Gemini OCR...")
-        gemini_documents = process_all_pages(cropped_data, ocr_prompt)
-        log_message("Metadata extraction completed.")
-
-        gemini_json_path = os.path.join(BASE_DIR, "gemini_documents.json")
-        with open(gemini_json_path, "w") as f:
-            json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
-        log_message("Gemini documents saved.")
-
-        log_message("Building vector store for semantic search...")
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        example_embedding = embeddings.embed_query("sample text")
-        d = len(example_embedding)
-        index = faiss.IndexFlatL2(d)
-        vector_store = FAISS(
-            embedding_function=embeddings,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={}
-        )
-        uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
-        vector_store.add_documents(documents=gemini_documents, ids=uuids)
-        log_message("Vector store built and documents indexed.")
-
-        log_message("Setting up retrievers...")
-        bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
-        log_message("Setting up RAG pipeline...")
-        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
-        log_message("RAG pipeline set up.")
-        st.session_state.processed = True
-        st.session_state.gemini_documents = gemini_documents
-        st.session_state.vector_store = vector_store
-        st.session_state.compression_retriever = compression_retriever
-        log_message("Processing pipeline completed.")
-
-# Main area: Chat Interface for Query Search
+# Query interface for semantic search
 st.title("Chat Interface")
-st.info("Enter your query below to search the processed PDF data.")
-query = st.text_input("Query:") 
-
+query = st.text_input("Query:")
 if query and st.session_state.processed:
     st.write("Searching...")
     try:
@@ -680,4 +696,3 @@ if query and st.session_state.processed:
     except Exception as e:
         st.error(f"Search failed: {e}")
 
-st.write("Streamlit app finished processing.")
