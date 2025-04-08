@@ -55,6 +55,7 @@ if "processed" not in st.session_state:
     st.session_state.compression_retriever = None
     st.session_state.vector_db_path = None  # Store path for uploaded vector database
 
+
 # Asynchronous PDF to Images Conversion
 async def pdf_to_images_async(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
@@ -247,7 +248,7 @@ async def process_page_with_metadata_async(page_key, blocks, prompt):
     else:
         log_message(f"No metadata extracted for {page_key}")
         return None
-
+    
 # Run the full processing pipeline asynchronously
 async def run_processing_pipeline(pdf_path):
     log_message("Running PDF processing pipeline...")
@@ -268,7 +269,14 @@ async def run_processing_pipeline(pdf_path):
     log_message("Processing images with Gemini OCR...")
     gemini_documents = await process_all_pages_async(cropped_data, ocr_prompt)
 
+    # Ensure that documents are not empty before proceeding
+    gemini_documents = [doc for doc in gemini_documents if doc is not None]
+
     log_message("Metadata extraction completed.")
+
+    if not gemini_documents:
+        log_message("No valid documents processed.")
+        return None, None
 
     # Save metadata to JSON
     gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
@@ -291,7 +299,11 @@ async def run_processing_pipeline(pdf_path):
     )
 
     uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
-    vector_store.add_documents(documents=gemini_documents, ids=uuids)
+    try:
+        vector_store.add_documents(documents=gemini_documents, ids=uuids)
+    except Exception as e:
+        log_message(f"Error adding documents to FAISS: {e}")
+        return None, None
 
     log_message("Vector store built and documents indexed.")
 
