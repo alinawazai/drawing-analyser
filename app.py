@@ -393,6 +393,8 @@ import torch
 import nltk
 import fitz  # PyMuPDF
 import streamlit as st
+import glob
+import time
 
 # Download required NLTK resource if needed.
 try:
@@ -403,6 +405,9 @@ except LookupError:
 # Set up basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
 # Initialize session state for tracking processing state
 if "processed" not in st.session_state:
     st.session_state.processed = False
