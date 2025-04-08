@@ -341,7 +341,7 @@ if uploaded_pdf and not st.session_state.processed:
         log_message("RAG pipeline set up.")
         st.session_state.processed = True
         st.session_state.gemini_documents = gemini_documents
-        st.session_state.vector_store = vector_store
+        st.session_state.vector_store = vector_store  # Save vector store to session state
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
@@ -354,7 +354,7 @@ if st.session_state.processed:
     # Save the vector store after processing
     if st.button("Save and Download Vector Store"):
         os.makedirs(DATA_DIR, exist_ok=True)
-        vector_store.save_local(vectorstore_path)
+        st.session_state.vector_store.save_local(vectorstore_path)  # Save to session state
 
         # Provide the file for download
         with open(vectorstore_path, "rb") as f:
