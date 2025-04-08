@@ -119,16 +119,24 @@ class BlockDetectionModel:
             raise ValueError(f"Directory {images_dir} is empty or does not exist.")
         images = glob.glob(os.path.join(images_dir, "*.jpg"))
         log_message(f"Found {len(images)} low-res images for detection.")
-        # Process images as a batch. You may also loop over them one by one if needed.
-        results = self.model(images)
+        
         output = {}
-        for result in results:
-            image_name = os.path.basename(result.path)
-            labels = result.boxes.cls.tolist()
-            boxes = result.boxes.xywh.tolist()
-            output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
+        batch_size = 10  # Process 10 images at a time
+        
+        # Process images in batches of 10
+        for i in range(0, len(images), batch_size):
+            batch = images[i:i + batch_size]
+            log_message(f"Processing images {i + 1} to {min(i + batch_size, len(images))} of {len(images)}.")
+            results = self.model(batch)
+            for result in results:
+                image_name = os.path.basename(result.path)
+                labels = result.boxes.cls.tolist()
+                boxes = result.boxes.xywh.tolist()
+                output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
+        
         log_message("Block detection completed.")
         return output
+
 
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
