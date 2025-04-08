@@ -26,12 +26,14 @@ from google import genai
 
 import nltk
 
-# Download NLTK resources (punkt tokenizer)
+# Download required NLTK resource if needed.
 try:
-    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
-    nltk.download('punkt', quiet=True)
-# Asyncio setup to allow async calls
+    try:
+        nltk.download('punkt_tab', quiet=True)
+    except FileExistsError:
+        pass
 nest_asyncio.apply()
 
 # Load environment variables (Streamlit secrets)
