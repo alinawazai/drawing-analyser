@@ -53,7 +53,6 @@ if "processed" not in st.session_state:
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
-    st.session_state.vector_db_path = None  # Store path for uploaded vector database
 
 # Asynchronous PDF to Images Conversion
 async def pdf_to_images_async(pdf_path, output_dir, fixed_length=1080):
@@ -85,8 +84,18 @@ async def pdf_to_images_async(pdf_path, output_dir, fixed_length=1080):
     log_message("PDF conversion completed.")
     return file_paths
 
+# Process a single PDF page and convert it to an image
+async def process_page_async(doc, page_num, output_dir, base_name, fixed_length=1080):
+    page = doc[page_num]
+    scale = fixed_length / page.rect.width
+    matrix = fitz.Matrix(scale, scale)
+    pix = page.get_pixmap(matrix=matrix)
+    image_filename = f"{base_name}_page_{page_num + 1}.jpg"
+    image_path = os.path.join(output_dir, image_filename)
+    pix.save(image_path)
+    return [image_path]
 
-# BlockDetectionModel class to use YOLO for block detection
+# Block Detection Model
 class BlockDetectionModel:
     def __init__(self, weight, device=None):
         self.device = "cuda" if (device is None and torch.cuda.is_available()) else "cpu"
@@ -102,8 +111,7 @@ class BlockDetectionModel:
         output = {}
         batch_size = 10  # Process 10 images at a time
         tasks = []
-        
-        # Process images in batches asynchronously
+
         for i in range(0, len(images), batch_size):
             batch = images[i:i + batch_size]
             tasks.append(self.process_batch(batch, i, len(images)))
@@ -115,12 +123,23 @@ class BlockDetectionModel:
         log_message("Block detection completed.")
         return output
 
-# Asynchronous cropping function
+    async def process_batch(self, batch, start_idx, total_images):
+        log_message(f"Processing images {start_idx + 1} to {min(start_idx + len(batch), total_images)} of {total_images}.")
+        results = self.model(batch)
+        output = {}
+        for result in results:
+            image_name = os.path.basename(result.path)
+            labels = result.boxes.cls.tolist()
+            boxes = result.boxes.xywh.tolist()
+            output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
+        return output
+
+# Cropping function (asynchronous)
 async def crop_and_save_async(detection_output, output_dir):
     log_message("Cropping detected regions using high-res images asynchronously...")
     output_data = {}
     tasks = []
-    
+
     for image_name, detections in detection_output.items():
         tasks.append(crop_image_async(image_name, detections, output_dir))
 
@@ -165,12 +184,11 @@ async def crop_image_async(image_name, detections, output_dir):
         log_message(f"Error cropping {image_name}: {e}")
         return {}
 
-
+# Asynchronous processing for Gemini OCR
 async def process_with_gemini_async(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
     contents = [prompt]
     
-    # Prepare the images to send to Gemini
     for path in image_paths:
         try:
             with Image.open(path) as img:
@@ -180,21 +198,29 @@ async def process_with_gemini_async(image_paths, prompt):
             log_message(f"Error opening {path}: {e}")
             continue
     
-    # Call the Gemini API to process the images
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
-    
-    # Get the response text and clean it up by removing Markdown code block markers
     resp_text = response.text.strip()
-    if resp_text.startswith("```json"):
-        resp_text = resp_text.replace("```json", "").replace("```", "").strip()
-    
-    # Try parsing the cleaned-up response as JSON
+
     try:
         return json.loads(resp_text)
     except json.JSONDecodeError:
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
+
+# Process pages with metadata using Gemini OCR asynchronously
+async def process_all_pages_async(data, prompt):
+    log_message("Processing all pages asynchronously...")
+    tasks = []
+
+    for key, blocks in data.items():
+        tasks.append(process_page_with_metadata_async(key, blocks, prompt))
+
+    results = await asyncio.gather(*tasks)
+    documents = [result for result in results if result]
+    
+    log_message(f"Total {len(documents)} documents processed asynchronously.")
+    return documents
 
 # Process page metadata extraction
 async def process_page_with_metadata_async(page_key, blocks, prompt):
@@ -220,29 +246,6 @@ async def process_page_with_metadata_async(page_key, blocks, prompt):
     else:
         log_message(f"No metadata extracted for {page_key}")
         return None
-# Asynchronous processing for pages with metadata
-async def process_all_pages_async(data, prompt):
-    log_message("Processing all pages asynchronously...")
-    tasks = []
-    
-    for key, blocks in data.items():
-        tasks.append(process_page_with_metadata_async(key, blocks, prompt))
-
-    results = await asyncio.gather(*tasks)
-    documents = [result for result in results if result]
-    
-    log_message(f"Total {len(documents)} documents processed asynchronously.")
-    return documents
-# Process a single PDF page and convert it to an image
-async def process_page_async(doc, page_num, output_dir, base_name, fixed_length=1080):
-    page = doc[page_num]
-    scale = fixed_length / page.rect.width
-    matrix = fitz.Matrix(scale, scale)
-    pix = page.get_pixmap(matrix=matrix)
-    image_filename = f"{base_name}_page_{page_num + 1}.jpg"
-    image_path = os.path.join(output_dir, image_filename)
-    pix.save(image_path)
-    return [image_path]
 
 # Run the full processing pipeline asynchronously
 async def run_processing_pipeline(pdf_path):
@@ -319,7 +322,6 @@ def save_vector_db(vector_store):
         vector_db_path = os.path.join(DATA_DIR, "vector_db_index.faiss")
         faiss.write_index(vector_store.index, vector_db_path)
         st.session_state.vector_db_saved = True
-        st.session_state.vector_db_path = vector_db_path  # Save the path for future download
         st.sidebar.success("Vector database saved successfully.")
     except Exception as e:
         st.sidebar.error(f"Failed to save Vector Database: {e}")
@@ -328,15 +330,6 @@ def save_vector_db(vector_store):
 def run_streamlit():
     st.sidebar.title("PDF Processing")
     uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
-
-    # Upload existing vector database
-    uploaded_vector_db = st.sidebar.file_uploader("Upload Vector Database", type=["faiss"])
-    if uploaded_vector_db:
-        vector_db_path = os.path.join(DATA_DIR, uploaded_vector_db.name)
-        with open(vector_db_path, "wb") as f:
-            f.write(uploaded_vector_db.getbuffer())
-        st.sidebar.success("Vector Database uploaded successfully.")
-        st.session_state.vector_db_path = vector_db_path
 
     if uploaded_pdf:
         os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
@@ -354,40 +347,6 @@ def run_streamlit():
     # Option to save the vector database after processing is done
     if st.session_state.processed and st.sidebar.button("Save Vector Database"):
         save_vector_db(st.session_state.vector_store)
-
-    # Option to download the vector database
-    if st.session_state.vector_db_path and st.session_state.vector_db_saved:
-        st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
-
-    # Adding Query Text Box for Searching
-    query = st.text_input("Enter your query here:")
-
-    if query:
-        # Perform the retrieval from the vector store
-        log_message("Performing search query...")
-
-        if st.session_state.vector_store and st.session_state.compression_retriever:
-            try:
-                results = st.session_state.compression_retriever.invoke(query)
-                st.markdown("### Retrieved Documents:")
-
-                for doc in results:
-                    drawing = doc.metadata.get("drawing_name", "Unknown")
-                    st.write(f"**Drawing:** {drawing}")
-                    try:
-                        st.json(json.loads(doc.page_content))  # Display content in JSON format
-                    except Exception:
-                        st.write(doc.page_content)  # Fallback if JSON parsing fails
-
-                    img_path = doc.metadata.get("drawing_path", "")
-                    if img_path and os.path.exists(img_path):
-                        st.image(Image.open(img_path), caption=f"Image for {drawing}", width=400)
-            except Exception as e:
-                st.error(f"Error during retrieval: {e}")
-        elif st.session_state.vector_store:
-            st.error("No retriever available. Please process the PDF first.")
-        elif st.session_state.compression_retriever:
-            st.error("No vector database available. Please process the PDF first.")
 
 # Execute Streamlit UI
 run_streamlit()
