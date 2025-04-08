@@ -332,6 +332,8 @@ def save_vector_db(vector_store):
 def run_streamlit():
     st.sidebar.title("PDF Processing")
     uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
+    # Adding Query Text Box for Searching
+    query = st.text_input("Enter your query here:")
 
     # Upload existing vector database
     uploaded_vector_db = st.sidebar.file_uploader("Upload Vector Database", type=["faiss"])
@@ -363,8 +365,6 @@ def run_streamlit():
     if st.session_state.vector_db_path and st.session_state.vector_db_saved:
         st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
 
-    # Adding Query Text Box for Searching
-    query = st.text_input("Enter your query here:")
 
     if query:
         # Perform the retrieval from the vector store
