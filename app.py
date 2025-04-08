@@ -203,12 +203,13 @@ async def process_with_gemini_async(image_paths, prompt):
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
+    return resp_text
 
-    try:
-        return json.loads(resp_text)
-    except json.JSONDecodeError:
-        log_message(f"Failed to parse JSON: {resp_text}")
-        return None
+    # try:
+    #     return json.loads(resp_text)
+    # except json.JSONDecodeError:
+    #     log_message(f"Failed to parse JSON: {resp_text}")
+    #     return None
 
 # Process pages with metadata using Gemini OCR asynchronously
 async def process_all_pages_async(data, prompt):
