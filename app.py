@@ -369,13 +369,13 @@ def run_streamlit():
             loop = asyncio.get_event_loop()
             vector_store, compression_retriever = loop.run_until_complete(run_processing_pipeline(pdf_path))
 
-    # Option to save the vector database after processing is done
-    if st.session_state.processed and st.sidebar.button("Save Vector Database"):
-        save_vector_db(st.session_state.vector_store)
+    # # Option to save the vector database after processing is done
+    # if st.session_state.processed and st.sidebar.button("Save Vector Database"):
+    #     save_vector_db(st.session_state.vector_store)
 
-    # Option to download the vector database
-    if st.session_state.vector_db_path and st.session_state.vector_db_saved:
-        st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
+    # # Option to download the vector database
+    # if st.session_state.vector_db_path and st.session_state.vector_db_saved:
+    #     st.sidebar.download_button("Download Vector Database", data=open(st.session_state.vector_db_path, "rb"), file_name="vector_db_index.faiss", mime="application/octet-stream")
 
 
     if query:
