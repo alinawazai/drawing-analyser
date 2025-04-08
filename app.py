@@ -395,10 +395,10 @@ def run_streamlit():
                 for doc in results:
                     drawing = doc.metadata.get("drawing_name", "Unknown")
                     st.write(f"**Drawing:** {drawing}")
-                    try:
-                        st.json(json.loads(doc.page_content))  # Display content in JSON format
-                    except Exception:
-                        st.write(doc.page_content)  # Fallback if JSON parsing fails
+                    # try:
+                    #     st.json(json.loads(doc.page_content))  # Display content in JSON format
+                    # except Exception:
+                    #     st.write(doc.page_content)  # Fallback if JSON parsing fails
 
                     img_path = doc.metadata.get("drawing_path", "")
                     if img_path and os.path.exists(img_path):
