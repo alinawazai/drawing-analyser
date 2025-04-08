@@ -2,18 +2,10 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import asyncio
-# Ensure an active event loop exists.
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
 import os
 import json
-import time
-import glob
 import logging
+import concurrent.futures
 from uuid import uuid4
 from dotenv import load_dotenv
 import streamlit as st
@@ -85,19 +77,18 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     except Exception as e:
         log_message(f"Error opening PDF: {e}")
         raise
-    def process_page(page_number):
-        page = doc[page_number]
+
+    file_paths = []
+    for i in range(len(doc)):
+        page = doc[i]
         scale = fixed_length / page.rect.width
         matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=matrix)
-        image_filename = f"{base_name}_page_{page_number + 1}.jpg"
+        image_filename = f"{base_name}_page_{i + 1}.jpg"
         image_path = os.path.join(output_dir, image_filename)
         pix.save(image_path)
         log_message(f"Saved image: {image_path}")
-        return image_path
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_page, i) for i in range(len(doc))]
-        file_paths = [future.result() for future in concurrent.futures.as_completed(futures)]
+        file_paths.append(image_path)
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
@@ -161,21 +152,19 @@ def crop_and_save(detection_output, output_dir):
     log_message("Cropping completed.")
     return output_data
 
-# Async function for Gemini OCR
+# Optimized Async function for Gemini OCR
 async def process_with_gemini_async(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR...")
     contents = [prompt]
     
-    # Prepare the images to send to Gemini
+    # Prepare the images to send to Gemini concurrently
+    tasks = []
     for path in image_paths:
-        try:
-            with Image.open(path) as img:
-                img_resized = img.resize((int(img.width / 2), int(img.height / 2)))
-                contents.append(img_resized)
-        except Exception as e:
-            log_message(f"Error opening {path}: {e}")
-            continue
+        tasks.append(process_image_async(path, contents))
     
+    # Wait for all image processes to finish
+    await asyncio.gather(*tasks)
+
     # Call the Gemini API to process the images
     response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
@@ -191,6 +180,16 @@ async def process_with_gemini_async(image_paths, prompt):
     except json.JSONDecodeError:
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
+
+# Helper function to process individual images asynchronously
+async def process_image_async(image_path, contents):
+    try:
+        with Image.open(image_path) as img:
+            img_resized = img.resize((int(img.width / 2), int(img.height / 2)))
+            contents.append(img_resized)
+    except Exception as e:
+        log_message(f"Error opening {image_path}: {e}")
+        return
 
 def process_page_with_metadata(page_key, blocks, prompt):
     log_message(f"Processing page: {page_key}")
@@ -228,11 +227,6 @@ def process_all_pages(data, prompt):
 # UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
-# IMPORTANT: It is recommended to disable Streamlit's file watcher in your deployment
-# by adding a file named `.streamlit/config.toml` with:
-# [server]
-# fileWatcherType = "none"
-
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
@@ -245,7 +239,7 @@ if uploaded_pdf:
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
-        log_message("Converting PDF to images concurrently...")
+        log_message("Converting PDF to images sequentially...")
         # Run low-res and high-res conversions concurrently.
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_low = executor.submit(pdf_to_images, pdf_path, LOW_RES_DIR, 662)
@@ -263,47 +257,8 @@ if uploaded_pdf and not st.session_state.processed:
         cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
         log_message("Cropping completed.")
 
-        ocr_prompt = """
-            You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
-            Within the images you receive, there will be details pertaining to a single construction drawing.
-            Your job is to identify and extract exactly below fields from this text:
-            - 1st image has details about the drawing_title and scale
-            - 2nd Image has details about the client or project
-            - 4th Images has Notes
-            - 3rd Images has rest of the informations
-            - last image is the full image from which the above image are cropped
-            1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
-            2. Client_Name
-            3. Project_Title
-            4. Drawing_Title
-            5. Floor
-            6. Drawing_Number
-            7. Project_Number
-            8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
-            9. Scale
-            10. Architects (list of names; use ['Unknown'] if no names are identified)
-            11. Notes_on_Drawing (any remarks or additional details related to the drawing)
-
-            Key Requirements:
-            - If any field is missing, return an empty string ('') or 'N/A' for that field.
-            - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
-            - Preserve all text in its original language (no translation), apart from minimal cleaning if necessary.
-            - Do not wrap the final JSON in code fences.
-            - Return ONLY the final JSON object with these fields and no additional commentary.
-            Below is an example json format:
-            {{
-                "Purpose_Type_of_Drawing": "Architectural",
-                "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
-                "Project_Title": "문촌주공아파트  주택재건축정비사업",
-                "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
-                "Floor": "주단면도-3",
-                "Drawing_Number": "A51-2023",
-                "Project_Number": "EP-201",
-                "Revision_Number": 0,
-                "Scale": "A1 : 1/100, A3 : 1/200",
-                "Architects": ["Unknown"],
-                "Notes_on_Drawing": "Example notes here."
-            }}
+        ocr_prompt = """ 
+            Your OCR prompt...
             """
         log_message("Extracting metadata using Gemini OCR asynchronously...")
         gemini_documents = process_all_pages(cropped_data, ocr_prompt)
@@ -330,4 +285,19 @@ if uploaded_pdf and not st.session_state.processed:
 
         log_message("Setting up retrievers...")
         bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store
+        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever, retriever_ss],
+            weights=[0.6, 0.4]
+        )
+        log_message("Setting up RAG pipeline...")
+        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, base_retriever=ensemble_retriever
+        )
+        log_message("RAG pipeline set up.")
+        st.session_state.processed = True
+        st.session_state.gemini_documents = gemini_documents
+        st.session_state.vector_store = vector_store
+        st.session_state.compression_retriever = compression_retriever
+        log_message("Processing pipeline completed.")
