@@ -45,9 +45,12 @@ except LookupError:
 
 # Load environment variables
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-COHERE_API_KEY = os.getenv("COHERE_API_KEY")
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# COHERE_API_KEY = os.getenv("COHERE_API_KEY")
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
 
 # Directory structure (adjust as needed)
 DATA_DIR = "data"
