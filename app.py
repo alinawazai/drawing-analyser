@@ -25,6 +25,14 @@ import streamlit as st
 from prompts import OCR_PROMPT
 from google import genai
 
+# Download required NLTK resource if needed.
+try:
+    nltk.data.find('tokenizers/punkt_tab')
+except LookupError:
+    try:
+        nltk.download('punkt_tab', quiet=True)
+    except FileExistsError:
+        pass
 # Asyncio setup to allow async calls
 nest_asyncio.apply()
 
