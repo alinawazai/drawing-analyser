@@ -247,7 +247,7 @@ def process_all_pages(data, prompt):
 #     with open(f"{filename}_docstore.pkl", "wb") as f:
 #         pickle.dump(vector_store.docstore, f)  # Save the docstore separately
 #     return filename
-def save_vector_store_as_zip(vector_store, zip_filename):
+def save_vector_store_as_zip(vector_store, document zip_filename):
     # Create a temporary directory to store the files
     temp_dir = os.path.join(DATA_DIR, "temp_files")
     os.makedirs(temp_dir, exist_ok=True)
@@ -260,12 +260,15 @@ def save_vector_store_as_zip(vector_store, zip_filename):
     docstore_path = os.path.join(temp_dir, "docstore.pkl")
     with open(docstore_path, "wb") as f:
         pickle.dump(vector_store.docstore, f)
-    
+    document_path = os.path.join(temp_dir, "document.pkl")
+    with open(document_path, "wb") as f:
+        pickle.dump(document, f)
     # Create a zip file containing both the FAISS index and the docstore
     zip_file_path = zip_filename
     with zipfile.ZipFile(zip_file_path, 'w') as zipf:
         zipf.write(faiss_index_path, "faiss_index.index")
         zipf.write(docstore_path, "docstore.pkl")
+        zipf.write(document_path, "document.pkl")
     
     # Clean up temporary files
     for temp_file in os.listdir(temp_dir):
@@ -302,14 +305,7 @@ def save_vector_store_as_zip(vector_store, zip_filename):
 #         index_to_docstore_id={}
 #     )
 #     return vector_store
-def convert_docstore_to_documents(docstore):
-    documents = []
-    # Since InMemoryDocstore uses document IDs, we need to know the document IDs (in this case, 'doc1', 'doc2')
-    # If you have the list of document IDs, iterate through them and get each document
-    for doc_id in docstore.keys():  # Get the document IDs using keys() method
-        doc = docstore.get(doc_id)  # Retrieve the document using get()
-        documents.append(doc)  # Add to the list of documents
-    return documents
+
 def load_vector_store_from_zip(zip_filename):
     # Create a temporary directory to extract the zip content
     temp_dir = os.path.join(DATA_DIR, "temp_files")
@@ -327,7 +323,12 @@ def load_vector_store_from_zip(zip_filename):
     docstore_path = os.path.join(temp_dir, "docstore.pkl")
     with open(docstore_path, "rb") as f:
         docstore = pickle.load(f)
-    
+
+    #Loading document
+    document_path = os.path.join(temp_dir, "document.pkl")
+    with open(document_path, "rb") as f:
+        document = pickle.load(f)
+
     # Clean up the temporary directory
     for temp_file in os.listdir(temp_dir):
         temp_file_path = os.path.join(temp_dir, temp_file)
@@ -335,7 +336,7 @@ def load_vector_store_from_zip(zip_filename):
     
     os.rmdir(temp_dir)  # Remove the temporary directory
 
-    return faiss_index, docstore
+    return faiss_index, docstore, document
 # -------------------------
 # UI Layout
 # -------------------------
@@ -520,81 +521,60 @@ if uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
         # Load the vector store from the uploaded files
-        faiss_index, inmdocs = load_vector_store_from_zip(uploaded_vector_store)
-        # docs = convert_docstore_to_documents(inmdocs)
+        faiss_index, inmdocs, docs = load_vector_store_from_zip(uploaded_vector_store)
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
         vector_store = FAISS(
             embedding_function=embeddings,
             index=faiss_index,
-            docstore=inmdocs
+            docstore=InMemoryDocstore(),
+            index_to_docstore_id={}
         )
-        # uuids = [str(uuid4()) for _ in range(len(docs))]
-        # vector_store.add_documents(documents=docs, ids=uuids)
+        uuids = [str(uuid4()) for _ in range(len(docs))]
+        vector_store.add_documents(documents=docs, ids=uuids)
         st.session_state.vector_store = vector_store
-        # bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
+        bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
         retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
-        # ensemble_retriever = EnsembleRetriever(
-        #     retrievers=[bm25_retriever, retriever_ss],
-        #     weights=[0.6, 0.4]
-        # )
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever, retriever_ss],
+            weights=[0.6, 0.4]
+        )
         compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
         compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=retriever_ss
+            base_compressor=compressor, base_retriever=ensemble_retriever
         )
         st.session_state.compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, 
-            base_retriever=retriever_ss
+            base_retriever=ensemble_retriever
         )
 
         st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
     except Exception as e:
         st.error(f"Failed to load vector store: {e}")
 
-# st.title("Chat Interface")
-# st.info("Enter your query below to search the processed PDF data.")
-# query = st.text_input("Query:")
-# if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
-#     if query:
-#         st.write("Searching...")
-#         try:
-#             results = st.session_state.compression_retriever.invoke(query)
-#             st.write(results)
-#             st.write("found result")
-#             st.markdown("### Retrieved Documents:")
-#             for doc in results:
-#                 drawing = doc.metadata.get("drawing_name", "Unknown")
-#                 st.write(f"**Drawing:** {drawing}")
-#                 try:
-#                     st.json(json.loads(doc.page_content))
-#                 except Exception:
-#                     st.write(doc.page_content)
-#                 img_path = doc.metadata.get("drawing_path", "")
-#                 if img_path and os.path.exists(img_path):
-#                     st.image(Image.open(img_path), width=400)
-#         except Exception as e:
-#             st.error(f"Search failed: {e}")
-
-# st.write("Streamlit app finished processing.")
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
 if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
     if query:
         st.write("Searching...")
-        results = st.session_state.compression_retriever.invoke(query)
-        st.write(results)
-        st.write("found result")
-        st.markdown("### Retrieved Documents:")
-        for doc in results:
-            drawing = doc.metadata.get("drawing_name", "Unknown")
-            st.write(f"**Drawing:** {drawing}")
-            try:
-                st.json(json.loads(doc.page_content))
-            except Exception:
-                st.write(doc.page_content)
-            img_path = doc.metadata.get("drawing_path", "")
-            if img_path and os.path.exists(img_path):
-                st.image(Image.open(img_path), width=400)
-        
+        try:
+            results = st.session_state.compression_retriever.invoke(query)
+            st.write(results)
+            st.write("found result")
+            st.markdown("### Retrieved Documents:")
+            for doc in results:
+                drawing = doc.metadata.get("drawing_name", "Unknown")
+                st.write(f"**Drawing:** {drawing}")
+                try:
+                    st.json(json.loads(doc.page_content))
+                except Exception:
+                    st.write(doc.page_content)
+                img_path = doc.metadata.get("drawing_path", "")
+                if img_path and os.path.exists(img_path):
+                    st.image(Image.open(img_path), width=400)
+                else:
+                    st.write(img_path)
+        except Exception as e:
+            st.error(f"Search failed: {e}")
 
 st.write("Streamlit app finished processing.")
