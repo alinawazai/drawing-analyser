@@ -10,6 +10,9 @@ except RuntimeError:
     asyncio.set_event_loop(loop)
 import shutil
 import os
+import faiss
+import pickle
+from io import BytesIO
 import json
 import time
 import glob
@@ -236,7 +239,32 @@ def process_all_pages(data, prompt):
             log_message(f"No document returned for {key}")
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
+# Function to serialize and save the FAISS vector store
+def save_vector_store(vector_store, filename):
+    faiss_index = vector_store.index
+    faiss.write_index(faiss_index, filename)  # Save the FAISS index to file
+    with open(f"{filename}_docstore.pkl", "wb") as f:
+        pickle.dump(vector_store.docstore, f)  # Save the docstore separately
+    return filename
 
+# Function to load the FAISS vector store from the uploaded file
+def load_vector_store(filename):
+    # Load the FAISS index
+    faiss_index = faiss.read_index(filename)
+    
+    # Load the docstore
+    with open(f"{filename}_docstore.pkl", "rb") as f:
+        docstore = pickle.load(f)
+    
+    # Recreate the vector store using the loaded FAISS index and docstore
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    vector_store = FAISS(
+        embedding_function=embeddings,
+        index=faiss_index,
+        docstore=docstore,
+        index_to_docstore_id={}
+    )
+    return vector_store
 # -------------------------
 # UI Layout
 # -------------------------
@@ -366,7 +394,71 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
+if uploaded_pdf and st.session_state.processed:
+    # Add the "Download Vector Store" button
+    vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store")
 
+    if st.button("Download Vector Store"):
+        # Save and offer the vector store for download
+        download_path = os.path.join(DATA_DIR, f"{vector_store_filename}")
+        save_vector_store(st.session_state.vector_store, download_path)
+        
+        with open(f"{download_path}_docstore.pkl", "rb") as f:
+            docstore_data = f.read()
+
+        # Downloadable file link
+        st.download_button(
+            label="Download FAISS Vector Store",
+            data=docstore_data,
+            file_name=f"{vector_store_filename}_docstore.pkl",
+            mime="application/octet-stream"
+        )
+
+        # Allow downloading the FAISS index as well
+        with open(f"{download_path}", "rb") as f:
+            index_data = f.read()
+
+        st.download_button(
+            label="Download FAISS Index",
+            data=index_data,
+            file_name=f"{vector_store_filename}",
+            mime="application/octet-stream"
+        )
+
+# Add the "Upload Vector Store" button
+uploaded_vector_store = st.file_uploader("Upload a vector store", type=["pkl", "index"])
+
+if uploaded_vector_store:
+    # Load the vector store from the uploaded files
+    with open(uploaded_vector_store, "rb") as f:
+        vector_store_filename = f.name
+        loaded_vector_store = load_vector_store(vector_store_filename)
+        st.session_state.vector_store = loaded_vector_store
+        st.session_state.compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, 
+            base_retriever=ensemble_retriever
+        )
+        st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
+
+# # Allow the user to query the loaded vector store
+# query = st.text_input("Query:")
+# if query:
+#     st.write("Searching...")
+#     try:
+#         results = st.session_state.compression_retriever.invoke(query)
+#         st.markdown("### Retrieved Documents:")
+#         for doc in results:
+#             drawing = doc.metadata.get("drawing_name", "Unknown")
+#             st.write(f"**Drawing:** {drawing}")
+#             try:
+#                 st.json(json.loads(doc.page_content))
+#             except Exception:
+#                 st.write(doc.page_content)
+#             img_path = doc.metadata.get("drawing_path", "")
+#             if img_path and os.path.exists(img_path):
+#                 st.image(Image.open(img_path), width=400)
+#     except Exception as e:
+#         st.error(f"Search failed: {e}")
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
