@@ -16,6 +16,7 @@ from io import BytesIO
 import json
 import time
 import glob
+import zipfile
 import logging
 from uuid import uuid4
 from dotenv import load_dotenv
@@ -246,11 +247,34 @@ def process_all_pages(data, prompt):
 #     with open(f"{filename}_docstore.pkl", "wb") as f:
 #         pickle.dump(vector_store.docstore, f)  # Save the docstore separately
 #     return filename
-def save_vector_store(vector_store, filename):
-    with open(filename, "wb") as f:
-        pickle.dump(vector_store, f)  # Serialize the entire vector store object (index + docstore)
-    return filename
-
+def save_vector_store_as_zip(vector_store, zip_filename):
+    # Create a temporary directory to store the files
+    temp_dir = os.path.join(DATA_DIR, "temp_files")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Save the FAISS index
+    faiss_index_path = os.path.join(temp_dir, "faiss_index.index")
+    faiss.write_index(vector_store.index, faiss_index_path)
+    
+    # Save the docstore using pickle
+    docstore_path = os.path.join(temp_dir, "docstore.pkl")
+    with open(docstore_path, "wb") as f:
+        pickle.dump(vector_store.docstore, f)
+    
+    # Create a zip file containing both the FAISS index and the docstore
+    zip_file_path = zip_filename
+    with zipfile.ZipFile(zip_file_path, 'w') as zipf:
+        zipf.write(faiss_index_path, "faiss_index.index")
+        zipf.write(docstore_path, "docstore.pkl")
+    
+    # Clean up temporary files
+    for temp_file in os.listdir(temp_dir):
+        temp_file_path = os.path.join(temp_dir, temp_file)
+        os.remove(temp_file_path)
+    
+    os.rmdir(temp_dir)  # Remove the temporary directory
+    
+    return zip_file_path
 # # Function to load the FAISS vector store from the uploaded file
 # def load_vector_store(uploaded_file):
 #     # Read the uploaded file's content as bytes
@@ -278,21 +302,41 @@ def save_vector_store(vector_store, filename):
 #         index_to_docstore_id={}
 #     )
 #     return vector_store
-def load_vector_store(uploaded_file):
-    # Read the uploaded file's content as bytes
-    file_content = uploaded_file.getvalue()
-
-    # Save the uploaded content to a temporary file to use it with FAISS
-    temp_file_path = os.path.join(DATA_DIR, "temp_vector_store.pkl")  # Use .pkl extension
-    with open(temp_file_path, "wb") as temp_file:
-        temp_file.write(file_content)
-
-    # Load the pickled vector store (which contains both FAISS index and docstore)
-    with open(temp_file_path, "rb") as f:
-        vector_store = pickle.load(f)
-
-    # Return the loaded vector store
-    return vector_store
+def load_vector_store_from_zip(zip_filename):
+    # Create a temporary directory to extract the zip content
+    temp_dir = os.path.join(DATA_DIR, "temp_files")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Extract the zip file
+    with zipfile.ZipFile(zip_filename, 'r') as zipf:
+        zipf.extractall(temp_dir)
+    
+    # Load the FAISS index
+    faiss_index_path = os.path.join(temp_dir, "faiss_index.index")
+    faiss_index = faiss.read_index(faiss_index_path)
+    
+    # Load the docstore
+    docstore_path = os.path.join(temp_dir, "docstore.pkl")
+    with open(docstore_path, "rb") as f:
+        docstore = pickle.load(f)
+    
+    # Clean up the temporary directory
+    for temp_file in os.listdir(temp_dir):
+        temp_file_path = os.path.join(temp_dir, temp_file)
+        os.remove(temp_file_path)
+    
+    os.rmdir(temp_dir)  # Remove the temporary directory
+    
+    # Recreate the vector store
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    vector_store = FAISS(
+        embedding_function=embeddings,
+        index=faiss_index,
+        docstore=docstore,
+        index_to_docstore_id={}
+    )
+    
+    return vector_store, docstore
 # -------------------------
 # UI Layout
 # -------------------------
@@ -454,24 +498,22 @@ if uploaded_pdf and not st.session_state.processed:
 #         )
 if uploaded_pdf and st.session_state.processed:
     # Add the "Download Vector Store" button
-    vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store")
+    vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store.zip")
 
     if st.button("Download Vector Store"):
-        # Save and offer the entire vector store for download as a single file
-        download_path = os.path.join(DATA_DIR, f"{vector_store_filename}.pkl")  # Save as .pkl file
-        save_vector_store(st.session_state.vector_store, download_path)
-
-        # Offer the serialized FAISS vector store for download
-        with open(download_path, "rb") as f:
-            vector_store_data = f.read()
+        # Save the FAISS index and docstore into a zip file
+        zip_file_path = save_vector_store_as_zip(st.session_state.vector_store, os.path.join(DATA_DIR, vector_store_filename))
+        
+        # Offer the zip file for download
+        with open(zip_file_path, "rb") as f:
+            zip_data = f.read()
 
         st.download_button(
-            label="Download FAISS Vector Store",
-            data=vector_store_data,
-            file_name=f"{vector_store_filename}.pkl",
-            mime="application/octet-stream"
+            label="Download FAISS Vector Store as Zip",
+            data=zip_data,
+            file_name=vector_store_filename,
+            mime="application/zip"
         )
-
 # Add the "Upload Vector Store" button
 uploaded_vector_store = st.file_uploader("Upload a vector store", type=["pkl", "index"])
 
@@ -479,7 +521,7 @@ if uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
         # Load the vector store from the uploaded files
-        loaded_vector_store = load_vector_store(uploaded_vector_store)
+        loaded_vector_store, docs = load_vector_store_from_zip(uploaded_vector_store)
         st.session_state.vector_store = loaded_vector_store
         # bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
         retriever_ss = loaded_vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
