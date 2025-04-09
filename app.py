@@ -247,7 +247,7 @@ st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
-    st.session_state.processed = False
+    # st.session_state.processed = False
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
