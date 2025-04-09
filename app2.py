@@ -522,10 +522,14 @@ if uploaded_vector_store:
     try:
         # Load the vector store from the uploaded files
         faiss_index, inmdocs, docs = load_vector_store_from_zip(uploaded_vector_store)
+
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+        example_embedding = embeddings.embed_query("sample text")
+        d = len(example_embedding)
+        index = faiss.IndexFlatL2(d)
         vector_store = FAISS(
             embedding_function=embeddings,
-            index=faiss_index,
+            index=index,
             docstore=InMemoryDocstore(),
             index_to_docstore_id={}
         )
