@@ -526,8 +526,7 @@ if uploaded_vector_store:
         vector_store = FAISS(
             embedding_function=embeddings,
             index=faiss_index,
-            docstore=inmdocs,
-            index_to_docstore_id={}
+            docstore=inmdocs
         )
         # uuids = [str(uuid4()) for _ in range(len(docs))]
         # vector_store.add_documents(documents=docs, ids=uuids)
