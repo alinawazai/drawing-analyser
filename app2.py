@@ -594,7 +594,6 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
             # Check if the results are in the expected format (e.g., a list of documents)
             if not isinstance(results, list):
                 st.error(f"Unexpected result type: {type(results)}. Expected a list of documents.")
-                return
 
             st.write("Found results:")
             st.markdown("### Retrieved Documents:")
