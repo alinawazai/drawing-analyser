@@ -366,9 +366,10 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
+
+st.title("Chat Interface")
+st.info("Enter your query below to search the processed PDF data.")
 if not uploaded_pdf and st.session_state.processed:
-    st.title("Chat Interface")
-    st.info("Enter your query below to search the processed PDF data.")
     query = st.text_input("Query:")
     
     if query:
