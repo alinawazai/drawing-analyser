@@ -55,6 +55,17 @@ GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
 
+
+# Reset session state on new PDF upload
+def reset_session_state():
+    st.session_state.processed = False
+    st.session_state.gemini_documents = None
+    st.session_state.vector_store = None
+    st.session_state.compression_retriever = None
+    st.session_state.query_results = None  # Reset query results
+    st.session_state.logs = []  # Clear logs on new PDF upload
+    
+    
 # Directory structure (adjust as needed)
 DATA_DIR = "data"
 LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
@@ -65,8 +76,10 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
+# Function to append logs to session state
 def log_message(msg):
-    st.sidebar.write(msg)
+    st.session_state.logs.append(msg)  # Store log message in session state
+    st.sidebar.write(msg)  # Display in sidebar
 
 # Initialize session state (only processed flag and cached results)
 if "processed" not in st.session_state:
@@ -251,14 +264,6 @@ def process_all_pages(data, prompt):
 # -------------------------
 # UI Layout
 # -------------------------
-
-# Reset session state on new PDF upload
-def reset_session_state():
-    st.session_state.processed = False
-    st.session_state.gemini_documents = None
-    st.session_state.vector_store = None
-    st.session_state.compression_retriever = None
-    st.session_state.query_results = None  # Reset query results
     
 # PDF upload functionality
 st.sidebar.title("PDF Processing")
@@ -267,114 +272,107 @@ uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
     reset_session_state()  # Reset session state on new PDF upload
-
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
     st.sidebar.success("PDF uploaded successfully.")
+    
+    if not st.session_state.processed:
+        if st.sidebar.button("Run Processing Pipeline"):
+            log_message("Running processing pipeline...")
+            low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
+            high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
+            log_message("PDF conversion completed.")
 
-if uploaded_pdf and not st.session_state.processed:
-    if st.sidebar.button("Run Processing Pipeline"):
-        log_message("PDF uploaded successfully.")
+            log_message("Running YOLO detection on low-res images...")
+            yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
+            detection_results = yolo_model.predict_batch(LOW_RES_DIR)
+            log_message("Block detection completed.")
 
-        log_message("Converting PDF to images sequentially...")
-        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
-        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
-        log_message("PDF conversion completed.")
+            log_message("Cropping detected regions using high-res images...")
+            cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
+            log_message("Cropping completed.")
+            ocr_prompt = """
+                You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
+                Within the images you receive, there will be details pertaining to a single construction drawing.
+                Your job is to identify and extract exactly below fields from this text:
+                - 1st image has details about the drawing_title and scale
+                - 2nd Image has details about the client or project
+                - 4th Images has Notes
+                - 3rd Images has rest of the informations
+                - last image is the full image from which the above image are cropped
+                1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
+                2. Client_Name
+                3. Project_Title
+                4. Drawing_Title
+                5. Floor
+                6. Drawing_Number
+                7. Project_Number
+                8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
+                9. Scale
+                10. Architects (list of names; use ['Unknown'] if no names are identified)
+                11. Notes_on_Drawing (any remarks or additional details related to the drawing)
+                
+                Key Requirements:
+                - If any field is missing, return an empty string ('') or 'N/A' for that field.
+                - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
+                - Preserve all text in its original language (no translation), apart from minimal cleaning if necessary.
+                - Do not wrap the final JSON in code fences.
+                - Return ONLY the final JSON object with these fields and no additional commentary.
+                Below is an example json format:
+                {{
+                    "Purpose_Type_of_Drawing": "Architectural",
+                    "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
+                    "Project_Title": "문촌주공아파트  주택재건축정비사업",
+                    "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
+                    "Floor": "주단면도-3",
+                    "Drawing_Number": "A51-2023",
+                    "Project_Number": "EP-201",
+                    "Revision_Number": 0,
+                    "Scale": "A1 : 1/100, A3 : 1/200",
+                    "Architects": ["Unknown"],
+                    "Notes_on_Drawing": "Example notes here."
+                }}
+                """
+            log_message("Extracting metadata using Gemini OCR sequentially...")
+            gemini_documents = process_all_pages(cropped_data, ocr_prompt)
+            log_message("Metadata extraction completed.")
 
-        log_message("Running YOLO detection on low-res images...")
-        yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
-        detection_results = yolo_model.predict_batch(LOW_RES_DIR)
-        log_message("Block detection completed.")
+            gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
+            with open(gemini_json_path, "w") as f:
+                json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
+            log_message("Gemini documents saved.")
 
-        log_message("Cropping detected regions using high-res images...")
-        cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
-        log_message("Cropping completed.")
+            embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+            example_embedding = embeddings.embed_query("sample text")
+            d = len(example_embedding)
+            index = faiss.IndexFlatL2(d)
+            vector_store = FAISS(
+                embedding_function=embeddings,
+                index=index,
+                docstore=InMemoryDocstore(),
+                index_to_docstore_id={},
+            )
+            uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
+            vector_store.add_documents(documents=gemini_documents, ids=uuids)
+            log_message("Vector store built and documents indexed.")
 
-        ocr_prompt = """
-            You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
-            Within the images you receive, there will be details pertaining to a single construction drawing.
-            Your job is to identify and extract exactly below fields from this text:
-            - 1st image has details about the drawing_title and scale
-            - 2nd Image has details about the client or project
-            - 4th Images has Notes
-            - 3rd Images has rest of the informations
-            - last image is the full image from which the above image are cropped
-            1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
-            2. Client_Name
-            3. Project_Title
-            4. Drawing_Title
-            5. Floor
-            6. Drawing_Number
-            7. Project_Number
-            8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
-            9. Scale
-            10. Architects (list of names; use ['Unknown'] if no names are identified)
-            11. Notes_on_Drawing (any remarks or additional details related to the drawing)
-            
-            Key Requirements:
-            - If any field is missing, return an empty string ('') or 'N/A' for that field.
-            - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
-            - Preserve all text in its original language (no translation), apart from minimal cleaning if necessary.
-            - Do not wrap the final JSON in code fences.
-            - Return ONLY the final JSON object with these fields and no additional commentary.
-            Below is an example json format:
-            {{
-                "Purpose_Type_of_Drawing": "Architectural",
-                "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
-                "Project_Title": "문촌주공아파트  주택재건축정비사업",
-                "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
-                "Floor": "주단면도-3",
-                "Drawing_Number": "A51-2023",
-                "Project_Number": "EP-201",
-                "Revision_Number": 0,
-                "Scale": "A1 : 1/100, A3 : 1/200",
-                "Architects": ["Unknown"],
-                "Notes_on_Drawing": "Example notes here."
-            }}
-            """
-        log_message("Extracting metadata using Gemini OCR sequentially...")
-        gemini_documents = process_all_pages(cropped_data, ocr_prompt)
-        log_message("Metadata extraction completed.")
-        gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
-        with open(gemini_json_path, "w") as f:
-            json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
-        log_message("Gemini documents saved.")
-
-        log_message("Building vector store for semantic search...")
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        example_embedding = embeddings.embed_query("sample text")
-        d = len(example_embedding)
-        index = faiss.IndexFlatL2(d)
-        vector_store = FAISS(
-            embedding_function=embeddings,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={},
-        )
-        uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
-        vector_store.add_documents(documents=gemini_documents, ids=uuids)
-        log_message("Vector store built and documents indexed.")
-
-        log_message("Setting up retrievers...")
-        bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
-        log_message("Setting up RAG pipeline...")
-        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
-        log_message("RAG pipeline set up.")
-        st.session_state.processed = True
-        st.session_state.gemini_documents = gemini_documents
-        st.session_state.vector_store = vector_store
-        st.session_state.compression_retriever = compression_retriever
-        log_message("Processing pipeline completed.")
+            bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
+            retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
+            ensemble_retriever = EnsembleRetriever(
+                retrievers=[bm25_retriever, retriever_ss],
+                weights=[0.6, 0.4]
+            )
+            compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
+            compression_retriever = ContextualCompressionRetriever(
+                base_compressor=compressor, base_retriever=ensemble_retriever
+            )
+            st.session_state.processed = True
+            st.session_state.gemini_documents = gemini_documents
+            st.session_state.vector_store = vector_store
+            st.session_state.compression_retriever = compression_retriever
+            log_message("Processing pipeline completed.")
 
 # Query section
 st.title("Chat Interface")
@@ -401,8 +399,8 @@ if query and st.session_state.processed:
     except Exception as e:
         st.error(f"Search failed: {e}")
 
-# Show logs if query results exist
-if st.session_state.query_results is None:
+# Display logs
+if not st.session_state.query_results:
     st.write("Streamlit app finished processing.")
 else:
     st.write("Logs are cleared, and the results are displayed.")
