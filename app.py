@@ -75,6 +75,11 @@ if "processed" not in st.session_state:
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
 
+# Initialize session state for query_results if not already set
+if "query_results" not in st.session_state:
+    st.session_state.query_results = None
+
+
 # -------------------------
 # Pipeline Functions (Sequential Version)
 # -------------------------
