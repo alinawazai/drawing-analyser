@@ -302,6 +302,13 @@ def save_vector_store_as_zip(vector_store, zip_filename):
 #         index_to_docstore_id={}
 #     )
 #     return vector_store
+def convert_docstore_to_documents(docstore):
+    documents = []
+    # Iterate through the docstore and get the Document objects
+    for doc_id, doc in docstore.items():
+        # doc is already a LangChain Document, so no need to recreate it
+        documents.append(doc)  # Add to the list of documents
+    return documents
 def load_vector_store_from_zip(zip_filename):
     # Create a temporary directory to extract the zip content
     temp_dir = os.path.join(DATA_DIR, "temp_files")
@@ -512,7 +519,8 @@ if uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
         # Load the vector store from the uploaded files
-        faiss_index, docs = load_vector_store_from_zip(uploaded_vector_store)
+        faiss_index, inmdocs = load_vector_store_from_zip(uploaded_vector_store)
+        docs = convert_docstore_to_documents(inmdocs)
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
         vector_store = FAISS(
             embedding_function=embeddings,
