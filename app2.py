@@ -247,7 +247,7 @@ def process_all_pages(data, prompt):
 #     with open(f"{filename}_docstore.pkl", "wb") as f:
 #         pickle.dump(vector_store.docstore, f)  # Save the docstore separately
 #     return filename
-def save_vector_store_as_zip(vector_store, document zip_filename):
+def save_vector_store_as_zip(vector_store, document, zip_filename):
     # Create a temporary directory to store the files
     temp_dir = os.path.join(DATA_DIR, "temp_files")
     os.makedirs(temp_dir, exist_ok=True)
@@ -502,7 +502,7 @@ if uploaded_pdf and st.session_state.processed:
 
     if st.button("Download Vector Store"):
         # Save the FAISS index and docstore into a zip file
-        zip_file_path = save_vector_store_as_zip(st.session_state.vector_store, os.path.join(DATA_DIR, vector_store_filename))
+        zip_file_path = save_vector_store_as_zip(st.session_state.vector_store, st.session_state.gemini_documents, os.path.join(DATA_DIR, vector_store_filename))
         
         # Offer the zip file for download
         with open(zip_file_path, "rb") as f:
