@@ -326,17 +326,8 @@ def load_vector_store_from_zip(zip_filename):
         os.remove(temp_file_path)
     
     os.rmdir(temp_dir)  # Remove the temporary directory
-    
-    # Recreate the vector store
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-    vector_store = FAISS(
-        embedding_function=embeddings,
-        index=faiss_index,
-        docstore=docstore,
-        index_to_docstore_id={}
-    )
-    
-    return vector_store, docstore
+
+    return faiss_index, docstore
 # -------------------------
 # UI Layout
 # -------------------------
@@ -521,22 +512,29 @@ if uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
         # Load the vector store from the uploaded files
-        loaded_vector_store, docs = load_vector_store_from_zip(uploaded_vector_store)
-        st.write(docs)
-        st.session_state.vector_store = loaded_vector_store
-        # bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
+        faiss_index, docs = load_vector_store_from_zip(uploaded_vector_store)
+        vector_store = FAISS(
+            embedding_function=embeddings,
+            index=faiss_index,
+            docstore=InMemoryDocstore(),
+            index_to_docstore_id={}
+        )
+        uuids = [str(uuid4()) for _ in range(len(docs))]
+        vector_store.add_documents(documents=docs, ids=uuids)
+        st.session_state.vector_store = vector_store
+        bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
         retriever_ss = loaded_vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
-        # ensemble_retriever = EnsembleRetriever(
-        #     retrievers=[bm25_retriever, retriever_ss],
-        #     weights=[0.6, 0.4]
-        # )
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever, retriever_ss],
+            weights=[0.6, 0.4]
+        )
         compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
         compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=retriever_ss
+            base_compressor=compressor, base_retriever=ensemble_retriever
         )
         st.session_state.compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, 
-            base_retriever=retriever_ss
+            base_retriever=ensemble_retriever
         )
 
         st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
@@ -551,8 +549,6 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
         st.write("Searching...")
         try:
             results = st.session_state.compression_retriever.invoke(query)
-            st.write("Results:", results)  # Debugging line to see what the retriever returns
-            st.write("Type of results:", type(results))  # Check the type of the results
             st.markdown("### Retrieved Documents:")
             for doc in results:
                 drawing = doc.metadata.get("drawing_name", "Unknown")
