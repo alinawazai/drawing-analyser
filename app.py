@@ -544,6 +544,9 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
                 except Exception:
                     st.write(doc.page_content)
                 img_path = doc.metadata.get("drawing_path", "")
+                extraction_dir=DATA_DIR
+                high_res_images_dir = os.path.join(extraction_dir, "high_res_images")
+                st.image_dir_for_vector_db = high_res_images_dir
                 img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
                 if img_path and os.path.exists(img_path):
                     st.image(Image.open(img_path), width=400)
