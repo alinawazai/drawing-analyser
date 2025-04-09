@@ -515,7 +515,7 @@ if uploaded_pdf and st.session_state.processed:
             mime="application/zip"
         )
 # Add the "Upload Vector Store" button
-uploaded_vector_store = st.file_uploader("Upload a vector store", type=["pkl", "index"])
+uploaded_vector_store = st.file_uploader("Upload a vector store", type=[".zip"])
 
 if uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)
