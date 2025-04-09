@@ -458,10 +458,21 @@ if uploaded_vector_store:
         # Load the vector store from the uploaded files
         loaded_vector_store = load_vector_store(uploaded_vector_store)
         st.session_state.vector_store = loaded_vector_store
+        bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
+        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever, retriever_ss],
+            weights=[0.6, 0.4]
+        )
+        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, base_retriever=ensemble_retriever
+        )
         st.session_state.compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, 
             base_retriever=ensemble_retriever
         )
+
         st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
     except Exception as e:
         st.error(f"Failed to load vector store: {e}")
@@ -488,7 +499,7 @@ if uploaded_vector_store:
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
-if uploaded_pdf and st.session_state.processed:
+if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
     if query:
         st.write("Searching...")
         try:
