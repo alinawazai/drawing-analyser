@@ -1,16 +1,5 @@
 import asyncio
-# Ensure an active event loop exists.
 import nest_asyncio
-nest_asyncio.apply()
-
-import asyncio
-# Ensure an active event loop exists.
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
 import os
 import json
 import shutil
@@ -18,7 +7,6 @@ import time
 import glob
 import logging
 from uuid import uuid4
-from dotenv import load_dotenv
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
@@ -45,34 +33,19 @@ except LookupError:
     except FileExistsError:
         pass
 
-# Load environment variables
-# load_dotenv()
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# COHERE_API_KEY = os.getenv("COHERE_API_KEY")
-# Use Streamlit secrets for API keys
+# Load environment variables (e.g., API keys)
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
 
-
-# Reset session state on new PDF upload
-def reset_session_state():
-    st.session_state.processed = False
-    st.session_state.gemini_documents = None
-    st.session_state.vector_store = None
-    st.session_state.compression_retriever = None
-    st.session_state.query_results = None  # Reset query results
-    st.session_state.logs = []  # Clear logs on new PDF upload
-    
-    
 # Directory structure (adjust as needed)
 DATA_DIR = "data"
-LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")   # For detection
-HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
+LOW_RES_DIR = os.path.join(DATA_DIR, "40_dpi")  # For detection
+HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")  # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 from google import genai
 client = genai.Client(api_key=GEMINI_API_KEY)
+
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -87,16 +60,26 @@ if "processed" not in st.session_state:
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
+    st.session_state.logs = []  # Initialize logs in session state
 
 # Initialize session state for query_results if not already set
 if "query_results" not in st.session_state:
     st.session_state.query_results = None
 
 
+# Reset session state on new PDF upload
+def reset_session_state():
+    st.session_state.processed = False
+    st.session_state.gemini_documents = None
+    st.session_state.vector_store = None
+    st.session_state.compression_retriever = None
+    st.session_state.query_results = None  # Reset query results
+    st.session_state.logs = []  # Clear logs on new PDF upload
+
+
 # -------------------------
 # Pipeline Functions (Sequential Version)
 # -------------------------
-
 
 def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     # Remove old images if the directory already exists
@@ -134,6 +117,7 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
+
 
 class BlockDetectionModel:
     def __init__(self, weight, device=None):
@@ -205,7 +189,6 @@ def crop_and_save(detection_output, output_dir):
 
 def process_with_gemini(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
-    # Even though this step is originally asynchronous, processing sequentially reduces load.
     contents = [prompt]
     for path in image_paths:
         try:
@@ -215,7 +198,6 @@ def process_with_gemini(image_paths, prompt):
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
 
-    # time.sleep(4)  # Simple rate-limiting
     response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
@@ -261,10 +243,11 @@ def process_all_pages(data, prompt):
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
 
+
 # -------------------------
 # UI Layout
 # -------------------------
-    
+
 # PDF upload functionality
 st.sidebar.title("PDF Processing")
 
