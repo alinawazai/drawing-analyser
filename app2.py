@@ -46,12 +46,6 @@ except LookupError:
     except FileExistsError:
         pass
 
-# Load environment variables
-# load_dotenv()
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# COHERE_API_KEY = os.getenv("COHERE_API_KEY")
-# Use Streamlit secrets for API keys
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 COHERE_API_KEY = st.secrets["COHERE_API_KEY"]
@@ -240,13 +234,7 @@ def process_all_pages(data, prompt):
             log_message(f"No document returned for {key}")
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
-# Function to serialize and save the FAISS vector store
-# def save_vector_store(vector_store, filename):
-#     faiss_index = vector_store.index
-#     faiss.write_index(faiss_index, filename)  # Save the FAISS index to file
-#     with open(f"{filename}_docstore.pkl", "wb") as f:
-#         pickle.dump(vector_store.docstore, f)  # Save the docstore separately
-#     return filename
+
 def save_vector_store_as_zip(vector_store, document, zip_filename):
     # Create a temporary directory to store the files
     temp_dir = os.path.join(DATA_DIR, "temp_files")
@@ -278,33 +266,7 @@ def save_vector_store_as_zip(vector_store, document, zip_filename):
     os.rmdir(temp_dir)  # Remove the temporary directory
     
     return zip_file_path
-# # Function to load the FAISS vector store from the uploaded file
-# def load_vector_store(uploaded_file):
-#     # Read the uploaded file's content as bytes
-#     file_content = uploaded_file.getvalue()
-    
-#     # Save the uploaded content to a temporary file to use it with FAISS
-#     temp_file_path = os.path.join(DATA_DIR, "temp_vector_store.index")
-#     with open(temp_file_path, "wb") as temp_file:
-#         temp_file.write(file_content)
 
-#     # Load the FAISS index
-#     faiss_index = faiss.read_index(temp_file_path)
-    
-#     # Load the docstore (assuming that it was uploaded as a separate file)
-#     docstore_path = uploaded_file.name.replace(".index", "_docstore.pkl")
-#     with open(docstore_path, "rb") as f:
-#         docstore = pickle.load(f)
-
-#     # Recreate the vector store using the loaded FAISS index and docstore
-#     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-#     vector_store = FAISS(
-#         embedding_function=embeddings,
-#         index=faiss_index,
-#         docstore=docstore,
-#         index_to_docstore_id={}
-#     )
-#     return vector_store
 
 def load_vector_store_from_zip(zip_filename):
     # Create a temporary directory to extract the zip content
@@ -466,36 +428,6 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
-# if uploaded_pdf and st.session_state.processed:
-#     # Add the "Download Vector Store" button
-#     vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store")
-
-#     if st.button("Download Vector Store"):
-#         # Save and offer the vector store for download
-#         download_path = os.path.join(DATA_DIR, f"{vector_store_filename}")
-#         save_vector_store(st.session_state.vector_store, download_path)
-        
-#         with open(f"{download_path}_docstore.pkl", "rb") as f:
-#             docstore_data = f.read()
-
-#         # Downloadable file link
-#         st.download_button(
-#             label="Download FAISS Vector Store",
-#             data=docstore_data,
-#             file_name=f"{vector_store_filename}_docstore.pkl",
-#             mime="application/octet-stream"
-#         )
-
-#         # Allow downloading the FAISS index as well
-#         with open(f"{download_path}", "rb") as f:
-#             index_data = f.read()
-
-#         st.download_button(
-#             label="Download FAISS Index",
-#             data=index_data,
-#             file_name=f"{vector_store_filename}",
-#             mime="application/octet-stream"
-#         )
 if uploaded_pdf and st.session_state.processed:
     # Add the "Download Vector Store" button
     vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store.zip")
