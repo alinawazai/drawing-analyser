@@ -513,6 +513,7 @@ if uploaded_vector_store:
     try:
         # Load the vector store from the uploaded files
         faiss_index, docs = load_vector_store_from_zip(uploaded_vector_store)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
         vector_store = FAISS(
             embedding_function=embeddings,
             index=faiss_index,
