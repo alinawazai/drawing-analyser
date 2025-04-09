@@ -240,11 +240,15 @@ def process_all_pages(data, prompt):
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
 # Function to serialize and save the FAISS vector store
+# def save_vector_store(vector_store, filename):
+#     faiss_index = vector_store.index
+#     faiss.write_index(faiss_index, filename)  # Save the FAISS index to file
+#     with open(f"{filename}_docstore.pkl", "wb") as f:
+#         pickle.dump(vector_store.docstore, f)  # Save the docstore separately
+#     return filename
 def save_vector_store(vector_store, filename):
-    faiss_index = vector_store.index
-    faiss.write_index(faiss_index, filename)  # Save the FAISS index to file
-    with open(f"{filename}_docstore.pkl", "wb") as f:
-        pickle.dump(vector_store.docstore, f)  # Save the docstore separately
+    with open(filename, "wb") as f:
+        pickle.dump(vector_store, f)  # Serialize the entire vector store object (index + docstore)
     return filename
 
 # # Function to load the FAISS vector store from the uploaded file
@@ -418,34 +422,53 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
+# if uploaded_pdf and st.session_state.processed:
+#     # Add the "Download Vector Store" button
+#     vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store")
+
+#     if st.button("Download Vector Store"):
+#         # Save and offer the vector store for download
+#         download_path = os.path.join(DATA_DIR, f"{vector_store_filename}")
+#         save_vector_store(st.session_state.vector_store, download_path)
+        
+#         with open(f"{download_path}_docstore.pkl", "rb") as f:
+#             docstore_data = f.read()
+
+#         # Downloadable file link
+#         st.download_button(
+#             label="Download FAISS Vector Store",
+#             data=docstore_data,
+#             file_name=f"{vector_store_filename}_docstore.pkl",
+#             mime="application/octet-stream"
+#         )
+
+#         # Allow downloading the FAISS index as well
+#         with open(f"{download_path}", "rb") as f:
+#             index_data = f.read()
+
+#         st.download_button(
+#             label="Download FAISS Index",
+#             data=index_data,
+#             file_name=f"{vector_store_filename}",
+#             mime="application/octet-stream"
+#         )
 if uploaded_pdf and st.session_state.processed:
     # Add the "Download Vector Store" button
     vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store")
 
     if st.button("Download Vector Store"):
-        # Save and offer the vector store for download
-        download_path = os.path.join(DATA_DIR, f"{vector_store_filename}")
+        # Save and offer the entire vector store for download as a single file
+        download_path = os.path.join(DATA_DIR, f"{vector_store_filename}.pkl")  # Save as .pkl file
         save_vector_store(st.session_state.vector_store, download_path)
-        
-        with open(f"{download_path}_docstore.pkl", "rb") as f:
-            docstore_data = f.read()
 
-        # Downloadable file link
+        # Offer the serialized FAISS vector store for download
+        with open(download_path, "rb") as f:
+            vector_store_data = f.read()
+
         st.download_button(
             label="Download FAISS Vector Store",
-            data=docstore_data,
-            file_name=f"{vector_store_filename}_docstore.pkl",
-            mime="application/octet-stream"
-        )
-
-        # Allow downloading the FAISS index as well
-        with open(f"{download_path}", "rb") as f:
-            index_data = f.read()
-
-        st.download_button(
-            label="Download FAISS Index",
-            data=index_data,
-            file_name=f"{vector_store_filename}",
+            data=vector_store_data,
+            file_name=f"{vector_store_filename}.pkl",
             mime="application/octet-stream"
         )
 
