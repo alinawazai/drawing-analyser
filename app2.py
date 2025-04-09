@@ -459,7 +459,7 @@ if uploaded_vector_store:
         loaded_vector_store = load_vector_store(uploaded_vector_store)
         st.session_state.vector_store = loaded_vector_store
         # bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
+        retriever_ss = loaded_vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
         # ensemble_retriever = EnsembleRetriever(
         #     retrievers=[bm25_retriever, retriever_ss],
         #     weights=[0.6, 0.4]
