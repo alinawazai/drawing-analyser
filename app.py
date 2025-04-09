@@ -240,25 +240,19 @@ def process_all_pages(data, prompt):
 # UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
+# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
+# [server]
+# fileWatcherType = "none"
 
-# Upload a new PDF and reset the necessary session state
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
-# Check if a new PDF is uploaded, and reset session state
 if uploaded_pdf:
-    # Reset processed flag and clear previous data to trigger the button again
-    st.session_state.processed = False
-    st.session_state.gemini_documents = None
-    st.session_state.vector_store = None
-    st.session_state.compression_retriever = None
-
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
     st.sidebar.success("PDF uploaded successfully.")
 
-# Only show the "Run Processing Pipeline" button if no previous processing has been done
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully.")
@@ -361,4 +355,25 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
-        
+st.title("Chat Interface")
+st.info("Enter your query below to search the processed PDF data.")
+query = st.text_input("Query:")
+if query and st.session_state.processed:
+    st.write("Searching...")
+    try:
+        results = st.session_state.compression_retriever.invoke(query)
+        st.markdown("### Retrieved Documents:")
+        for doc in results:
+            drawing = doc.metadata.get("drawing_name", "Unknown")
+            st.write(f"**Drawing:** {drawing}")
+            try:
+                st.json(json.loads(doc.page_content))
+            except Exception:
+                st.write(doc.page_content)
+            img_path = doc.metadata.get("drawing_path", "")
+            if img_path and os.path.exists(img_path):
+                st.image(Image.open(img_path), width=400)
+    except Exception as e:
+        st.error(f"Search failed: {e}")
+
+st.write("Streamlit app finished processing.")
