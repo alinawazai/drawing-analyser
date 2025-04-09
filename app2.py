@@ -289,7 +289,7 @@ def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_ima
         except Exception as e:
             print(f"Failed to remove {temp_file_path}: {e}")
     
-    os.rmdir(temp_dir)  # Remove the temporary directory
+    shutil.rmtree(temp_dir)  # Remove the temporary directory
 
     return zip_file_path
 
