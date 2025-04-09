@@ -245,8 +245,6 @@ st.sidebar.title("PDF Processing")
 # [server]
 # fileWatcherType = "none"
 
-uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
-
 # Track if a new PDF is uploaded
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
