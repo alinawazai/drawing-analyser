@@ -328,12 +328,12 @@ def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
         if os.path.isfile(image_path):
             shutil.move(image_path, os.path.join(high_res_images_dir, image_name))
 
-    # Clean up the temporary directory
-    for temp_file in os.listdir(temp_dir):
-        temp_file_path = os.path.join(temp_dir, temp_file)
-        os.remove(temp_file_path)
+    # # Clean up the temporary directory
+    # for temp_file in os.listdir(temp_dir):
+    #     temp_file_path = os.path.join(temp_dir, temp_file)
+    #     os.remove(temp_file_path)
 
-    os.rmdir(temp_dir)  # Remove the temporary directory
+    shutil.rmtree(temp_dir)  # Remove the temporary directory
 
     return faiss_index, docstore, documents
 # -------------------------
