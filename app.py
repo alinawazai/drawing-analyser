@@ -146,13 +146,7 @@ class BlockDetectionModel:
         log_message("Block detection completed.")
         return output
 
-# Reset the session state when a new file is uploaded
-def reset_session_state():
-    st.session_state.processed = False
-    st.session_state.gemini_documents = None
-    st.session_state.vector_store = None
-    st.session_state.compression_retriever = None
-    
+
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
     scale_y = scale_x
@@ -252,15 +246,23 @@ def process_all_pages(data, prompt):
 # -------------------------
 # UI Layout
 # -------------------------
+
+# Reset session state on new PDF upload
+def reset_session_state():
+    st.session_state.processed = False
+    st.session_state.gemini_documents = None
+    st.session_state.vector_store = None
+    st.session_state.compression_retriever = None
+    st.session_state.query_results = None  # Reset query results
+    
+# PDF upload functionality
 st.sidebar.title("PDF Processing")
-# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
-# [server]
-# fileWatcherType = "none"
 
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
-    reset_session_state()  # Reset the session state before processing the new PDF
+    reset_session_state()  # Reset session state on new PDF upload
+
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
@@ -344,7 +346,7 @@ if uploaded_pdf and not st.session_state.processed:
             embedding_function=embeddings,
             index=index,
             docstore=InMemoryDocstore(),
-            index_to_docstore_id={}
+            index_to_docstore_id={},
         )
         uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
         vector_store.add_documents(documents=gemini_documents, ids=uuids)
@@ -352,7 +354,7 @@ if uploaded_pdf and not st.session_state.processed:
 
         log_message("Setting up retrievers...")
         bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
+        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
         ensemble_retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, retriever_ss],
             weights=[0.6, 0.4]
@@ -369,13 +371,17 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
+# Query section
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
+
+# Handle queries and show results
 if query and st.session_state.processed:
     st.write("Searching...")
     try:
         results = st.session_state.compression_retriever.invoke(query)
+        st.session_state.query_results = results  # Store the query results in session state
         st.markdown("### Retrieved Documents:")
         for doc in results:
             drawing = doc.metadata.get("drawing_name", "Unknown")
@@ -390,4 +396,8 @@ if query and st.session_state.processed:
     except Exception as e:
         st.error(f"Search failed: {e}")
 
-st.write("Streamlit app finished processing.")
+# Show logs if query results exist
+if st.session_state.query_results is None:
+    st.write("Streamlit app finished processing.")
+else:
+    st.write("Logs are cleared, and the results are displayed.")
