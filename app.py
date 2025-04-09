@@ -71,6 +71,7 @@ if "processed" not in st.session_state:
     st.session_state.gemini_documents = None
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
+    st.session_state.previous_pdf_uploaded = None  # Track the last uploaded PDF
 
 # -------------------------
 # Pipeline Functions (Sequential Version)
@@ -244,10 +245,19 @@ st.sidebar.title("PDF Processing")
 # [server]
 # fileWatcherType = "none"
 
+# Track if a new PDF is uploaded
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
+# Reset the session state when a new PDF is uploaded
 if uploaded_pdf:
-    # st.session_state.processed = False
+    if uploaded_pdf.name != st.session_state.previous_pdf_uploaded:
+        # Clear previous data and reset the state when a new PDF is uploaded
+        st.session_state.processed = False
+        st.session_state.gemini_documents = None
+        st.session_state.vector_store = None
+        st.session_state.compression_retriever = None
+        st.session_state.previous_pdf_uploaded = uploaded_pdf.name  # Store the name of the newly uploaded PDF
+
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
@@ -262,7 +272,7 @@ if uploaded_pdf and not st.session_state.processed:
         low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
         high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
         log_message("PDF conversion completed.")
-
+        # uploaded_pdf = None
         log_message("Running YOLO detection on low-res images...")
         yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
         detection_results = yolo_model.predict_batch(LOW_RES_DIR)
@@ -356,25 +366,27 @@ if uploaded_pdf and not st.session_state.processed:
         st.session_state.compression_retriever = compression_retriever
         log_message("Processing pipeline completed.")
 
+
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
-if query and st.session_state.processed:
-    st.write("Searching...")
-    try:
-        results = st.session_state.compression_retriever.invoke(query)
-        st.markdown("### Retrieved Documents:")
-        for doc in results:
-            drawing = doc.metadata.get("drawing_name", "Unknown")
-            st.write(f"**Drawing:** {drawing}")
-            try:
-                st.json(json.loads(doc.page_content))
-            except Exception:
-                st.write(doc.page_content)
-            img_path = doc.metadata.get("drawing_path", "")
-            if img_path and os.path.exists(img_path):
-                st.image(Image.open(img_path), width=400)
-    except Exception as e:
-        st.error(f"Search failed: {e}")
+if uploaded_pdf and st.session_state.processed:
+    if query:
+        st.write("Searching...")
+        try:
+            results = st.session_state.compression_retriever.invoke(query)
+            st.markdown("### Retrieved Documents:")
+            for doc in results:
+                drawing = doc.metadata.get("drawing_name", "Unknown")
+                st.write(f"**Drawing:** {drawing}")
+                try:
+                    st.json(json.loads(doc.page_content))
+                except Exception:
+                    st.write(doc.page_content)
+                img_path = doc.metadata.get("drawing_path", "")
+                if img_path and os.path.exists(img_path):
+                    st.image(Image.open(img_path), width=400)
+        except Exception as e:
+            st.error(f"Search failed: {e}")
 
 st.write("Streamlit app finished processing.")
