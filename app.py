@@ -81,9 +81,10 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        log_message(f"Created directory: {output_dir}")
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir)
+    log_message(f"Created directory: {output_dir}")
 
     try:
         doc = fitz.open(pdf_path)
@@ -334,8 +335,7 @@ if uploaded_pdf and not st.session_state.processed:
         uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
         vector_store.add_documents(documents=gemini_documents, ids=uuids)
         log_message("Vector store built and documents indexed.")
-        shutil.rmtree(LOW_RES_DIR)
-        shutil.rmtree(HIGH_RES_DIR)
+
         log_message("Setting up retrievers...")
         bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
         retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
