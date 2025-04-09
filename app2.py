@@ -235,7 +235,7 @@ def process_all_pages(data, prompt):
     log_message(f"Total {len(documents)} documents processed sequentially.")
     return documents
 
-def save_vector_store_as_zip(vector_store, document, zip_filename):
+def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_images_dir=HIGH_RES_DIR):
     # Create a temporary directory to store the files
     temp_dir = os.path.join(DATA_DIR, "temp_files")
     os.makedirs(temp_dir, exist_ok=True)
@@ -248,29 +248,48 @@ def save_vector_store_as_zip(vector_store, document, zip_filename):
     docstore_path = os.path.join(temp_dir, "docstore.pkl")
     with open(docstore_path, "wb") as f:
         pickle.dump(vector_store.docstore, f)
+
+    # Save the documents using pickle
     document_path = os.path.join(temp_dir, "document.pkl")
     with open(document_path, "wb") as f:
-        pickle.dump(document, f)
-    # Create a zip file containing both the FAISS index and the docstore
+        pickle.dump(documents, f)
+
+    # Include the high-resolution images
+    high_res_image_dir = os.path.join(temp_dir, "high_res_images")
+    os.makedirs(high_res_image_dir, exist_ok=True)
+
+    # Copy all high-res images to the temporary directory
+    for image_name in os.listdir(high_res_images_dir):
+        image_path = os.path.join(high_res_images_dir, image_name)
+        if os.path.isfile(image_path):
+            shutil.copy(image_path, os.path.join(high_res_image_dir, image_name))
+    
+    # Create a zip file containing all necessary files
     zip_file_path = zip_filename
     with zipfile.ZipFile(zip_file_path, 'w') as zipf:
         zipf.write(faiss_index_path, "faiss_index.index")
         zipf.write(docstore_path, "docstore.pkl")
         zipf.write(document_path, "document.pkl")
-    
+        
+        # Add the images to the zip file
+        for image_name in os.listdir(high_res_image_dir):
+            image_path = os.path.join(high_res_image_dir, image_name)
+            zipf.write(image_path, os.path.join("high_res_images", image_name))
+
     # Clean up temporary files
     for temp_file in os.listdir(temp_dir):
         temp_file_path = os.path.join(temp_dir, temp_file)
         os.remove(temp_file_path)
-    
+
     os.rmdir(temp_dir)  # Remove the temporary directory
     
     return zip_file_path
 
 
-def load_vector_store_from_zip(zip_filename):
+
+def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
     # Create a temporary directory to extract the zip content
-    temp_dir = os.path.join(DATA_DIR, "temp_files")
+    temp_dir = os.path.join(extraction_dir, "temp_files")
     os.makedirs(temp_dir, exist_ok=True)
     
     # Extract the zip file
@@ -286,19 +305,28 @@ def load_vector_store_from_zip(zip_filename):
     with open(docstore_path, "rb") as f:
         docstore = pickle.load(f)
 
-    #Loading document
+    # Load the documents
     document_path = os.path.join(temp_dir, "document.pkl")
     with open(document_path, "rb") as f:
-        document = pickle.load(f)
+        documents = pickle.load(f)
+
+    # Extract high-resolution images to a directory
+    high_res_images_dir = os.path.join(extraction_dir, "high_res_images")
+    os.makedirs(high_res_images_dir, exist_ok=True)
+
+    for image_name in os.listdir(os.path.join(temp_dir, "high_res_images")):
+        image_path = os.path.join(temp_dir, "high_res_images", image_name)
+        if os.path.isfile(image_path):
+            shutil.move(image_path, os.path.join(high_res_images_dir, image_name))
 
     # Clean up the temporary directory
     for temp_file in os.listdir(temp_dir):
         temp_file_path = os.path.join(temp_dir, temp_file)
         os.remove(temp_file_path)
-    
+
     os.rmdir(temp_dir)  # Remove the temporary directory
 
-    return faiss_index, docstore, document
+    return faiss_index, docstore, documents
 # -------------------------
 # UI Layout
 # -------------------------
@@ -433,8 +461,12 @@ if uploaded_pdf and st.session_state.processed:
     vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store.zip")
 
     if st.button("Download Vector Store"):
-        # Save the FAISS index and docstore into a zip file
-        zip_file_path = save_vector_store_as_zip(st.session_state.vector_store, st.session_state.gemini_documents, os.path.join(DATA_DIR, vector_store_filename))
+        # Save the FAISS index and docstore into a zip file with images
+        zip_file_path = save_vector_store_as_zip(
+            st.session_state.vector_store, 
+            st.session_state.gemini_documents, 
+            os.path.join(DATA_DIR, vector_store_filename)
+        )
         
         # Offer the zip file for download
         with open(zip_file_path, "rb") as f:
@@ -446,13 +478,14 @@ if uploaded_pdf and st.session_state.processed:
             file_name=vector_store_filename,
             mime="application/zip"
         )
+
 # Add the "Upload Vector Store" button
 uploaded_vector_store = st.file_uploader("Upload a vector store", type=[".zip"])
 
 if uploaded_vector_store:
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
-        # Load the vector store from the uploaded files
+        # Load the vector store from the uploaded files, including high-res images
         faiss_index, inmdocs, docs = load_vector_store_from_zip(uploaded_vector_store)
 
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
@@ -469,7 +502,7 @@ if uploaded_vector_store:
         vector_store.add_documents(documents=docs, ids=uuids)
         st.session_state.vector_store = vector_store
         bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
+        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
         ensemble_retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, retriever_ss],
             weights=[0.6, 0.4]
@@ -478,10 +511,7 @@ if uploaded_vector_store:
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, base_retriever=ensemble_retriever
         )
-        st.session_state.compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, 
-            base_retriever=ensemble_retriever
-        )
+        st.session_state.compression_retriever = compression_retriever
 
         st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
     except Exception as e:
