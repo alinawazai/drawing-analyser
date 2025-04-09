@@ -559,8 +559,6 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
         st.write("Searching...")
         try:
             results = st.session_state.compression_retriever.invoke(query)
-            st.write(results)
-            st.write("found result")
             st.markdown("### Retrieved Documents:")
             for doc in results:
                 drawing = doc.metadata.get("drawing_name", "Unknown")
