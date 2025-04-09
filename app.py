@@ -1,3 +1,5 @@
+import asyncio
+# Ensure an active event loop exists.
 import nest_asyncio
 nest_asyncio.apply()
 
@@ -144,7 +146,13 @@ class BlockDetectionModel:
         log_message("Block detection completed.")
         return output
 
-
+# Reset the session state when a new file is uploaded
+def reset_session_state():
+    st.session_state.processed = False
+    st.session_state.gemini_documents = None
+    st.session_state.vector_store = None
+    st.session_state.compression_retriever = None
+    
 def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
     scale_x = dst_size[0] / src_size[0]
     scale_y = scale_x
@@ -252,6 +260,7 @@ st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
+    reset_session_state()  # Reset the session state before processing the new PDF
     os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
