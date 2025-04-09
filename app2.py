@@ -370,7 +370,7 @@ if uploaded_pdf and not st.session_state.processed:
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
-if not uploaded_pdf and st.session_state.processed:
+if uploaded_pdf and st.session_state.processed:
     if query:
         st.write("Searching...")
         try:
