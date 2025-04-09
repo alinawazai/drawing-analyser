@@ -321,6 +321,7 @@ def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
 
     # Extract high-resolution images to a directory
     high_res_images_dir = os.path.join(extraction_dir, "high_res_images")
+    st.image_dir_for_vector_db = high_res_images_dir
     os.makedirs(high_res_images_dir, exist_ok=True)
 
     for image_name in os.listdir(os.path.join(temp_dir, "high_res_images")):
@@ -543,10 +544,13 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
                 except Exception:
                     st.write(doc.page_content)
                 img_path = doc.metadata.get("drawing_path", "")
+                img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
                 if img_path and os.path.exists(img_path):
                     st.image(Image.open(img_path), width=400)
+                elif img_path2 and os.path.exists(img_path2):
+                    st.image(Image.open(img_path2), width=400)
                 else:
-                    st.write(img_path)
+                    st.write(img_path2)
         except Exception as e:
             st.error(f"Search failed: {e}")
 
