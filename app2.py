@@ -304,9 +304,10 @@ def save_vector_store_as_zip(vector_store, zip_filename):
 #     return vector_store
 def convert_docstore_to_documents(docstore):
     documents = []
-    # Iterate through the docstore and get the Document objects
-    for doc_id, doc in docstore.items():
-        # doc is already a LangChain Document, so no need to recreate it
+    # Since InMemoryDocstore uses document IDs, we need to know the document IDs (in this case, 'doc1', 'doc2')
+    # If you have the list of document IDs, iterate through them and get each document
+    for doc_id in docstore.keys():  # Get the document IDs using keys() method
+        doc = docstore.get(doc_id)  # Retrieve the document using get()
         documents.append(doc)  # Add to the list of documents
     return documents
 def load_vector_store_from_zip(zip_filename):
