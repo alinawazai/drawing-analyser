@@ -556,8 +556,8 @@ if uploaded_vector_store:
         st.error(f"Failed to load vector store: {e}")
 
 st.title("Chat Interface")
-st.info("Enter your query below to search the processed PDF data.")
-query = st.text_input("Query:")
+st.info("Enter your query below")
+query = st.text_input("Query Here:")
 if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
     if query:
         st.write("Searching...")
