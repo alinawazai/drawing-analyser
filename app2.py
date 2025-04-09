@@ -522,6 +522,7 @@ if uploaded_vector_store:
     try:
         # Load the vector store from the uploaded files
         loaded_vector_store, docs = load_vector_store_from_zip(uploaded_vector_store)
+        st.write(docs)
         st.session_state.vector_store = loaded_vector_store
         # bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
         retriever_ss = loaded_vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
@@ -542,25 +543,6 @@ if uploaded_vector_store:
     except Exception as e:
         st.error(f"Failed to load vector store: {e}")
 
-# # Allow the user to query the loaded vector store
-# query = st.text_input("Query:")
-# if query:
-#     st.write("Searching...")
-#     try:
-#         results = st.session_state.compression_retriever.invoke(query)
-#         st.markdown("### Retrieved Documents:")
-#         for doc in results:
-#             drawing = doc.metadata.get("drawing_name", "Unknown")
-#             st.write(f"**Drawing:** {drawing}")
-#             try:
-#                 st.json(json.loads(doc.page_content))
-#             except Exception:
-#                 st.write(doc.page_content)
-#             img_path = doc.metadata.get("drawing_path", "")
-#             if img_path and os.path.exists(img_path):
-#                 st.image(Image.open(img_path), width=400)
-#     except Exception as e:
-#         st.error(f"Search failed: {e}")
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
@@ -569,6 +551,8 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
         st.write("Searching...")
         try:
             results = st.session_state.compression_retriever.invoke(query)
+            st.write("Results:", results)  # Debugging line to see what the retriever returns
+            st.write("Type of results:", type(results))  # Check the type of the results
             st.markdown("### Retrieved Documents:")
             for doc in results:
                 drawing = doc.metadata.get("drawing_name", "Unknown")
