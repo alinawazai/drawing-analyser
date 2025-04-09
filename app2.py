@@ -533,7 +533,7 @@ if uploaded_vector_store:
         # vector_store.add_documents(documents=docs, ids=uuids)
         st.session_state.vector_store = vector_store
         # bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
+        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
         # ensemble_retriever = EnsembleRetriever(
         #     retrievers=[bm25_retriever, retriever_ss],
         #     weights=[0.6, 0.4]
@@ -559,6 +559,8 @@ if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
         st.write("Searching...")
         try:
             results = st.session_state.compression_retriever.invoke(query)
+            st.write(results)
+            st.write("found result")
             st.markdown("### Retrieved Documents:")
             for doc in results:
                 drawing = doc.metadata.get("drawing_name", "Unknown")
