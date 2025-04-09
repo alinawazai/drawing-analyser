@@ -8,7 +8,7 @@ try:
 except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-
+import shutil
 import os
 import json
 import time
