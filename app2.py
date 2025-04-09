@@ -458,19 +458,19 @@ if uploaded_vector_store:
         # Load the vector store from the uploaded files
         loaded_vector_store = load_vector_store(uploaded_vector_store)
         st.session_state.vector_store = loaded_vector_store
-        bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
+        # bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
+        retriever_ss = vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
+        # ensemble_retriever = EnsembleRetriever(
+        #     retrievers=[bm25_retriever, retriever_ss],
+        #     weights=[0.6, 0.4]
+        # )
         compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
         compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
+            base_compressor=compressor, base_retriever=retriever_ss
         )
         st.session_state.compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, 
-            base_retriever=ensemble_retriever
+            base_retriever=retriever_ss
         )
 
         st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
