@@ -521,30 +521,30 @@ if uploaded_vector_store:
     try:
         # Load the vector store from the uploaded files
         faiss_index, inmdocs = load_vector_store_from_zip(uploaded_vector_store)
-        docs = convert_docstore_to_documents(inmdocs)
+        # docs = convert_docstore_to_documents(inmdocs)
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
         vector_store = FAISS(
             embedding_function=embeddings,
             index=faiss_index,
-            docstore=InMemoryDocstore(),
+            docstore=inmdocs,
             index_to_docstore_id={}
         )
-        uuids = [str(uuid4()) for _ in range(len(docs))]
-        vector_store.add_documents(documents=docs, ids=uuids)
+        # uuids = [str(uuid4()) for _ in range(len(docs))]
+        # vector_store.add_documents(documents=docs, ids=uuids)
         st.session_state.vector_store = vector_store
-        bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
+        # bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
         retriever_ss = loaded_vector_store.as_retriever(search_type="mmr", search_kwargs={"k":10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
+        # ensemble_retriever = EnsembleRetriever(
+        #     retrievers=[bm25_retriever, retriever_ss],
+        #     weights=[0.6, 0.4]
+        # )
         compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
         compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
+            base_compressor=compressor, base_retriever=retriever_ss
         )
         st.session_state.compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, 
-            base_retriever=ensemble_retriever
+            base_retriever=retriever_ss
         )
 
         st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
