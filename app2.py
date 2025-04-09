@@ -579,40 +579,23 @@ if uploaded_vector_store:
 st.title("Chat Interface")
 st.info("Enter your query below to search the processed PDF data.")
 query = st.text_input("Query:")
-
 if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
     if query:
         st.write("Searching...")
-        try:
-            # Retrieve the results from the retriever
-            results = st.session_state.compression_retriever.invoke(query)
-
-            # Debug: Check the type and content of the results
-            st.write(f"Results: {results}")
-            st.write(f"Type of results: {type(results)}")
-
-            # Check if the results are in the expected format (e.g., a list of documents)
-            if not isinstance(results, list):
-                st.error(f"Unexpected result type: {type(results)}. Expected a list of documents.")
-
-            st.write("Found results:")
-            st.markdown("### Retrieved Documents:")
-            for doc in results:
-                # Ensure the document is valid
-                if isinstance(doc, Document):  # Check if the result is a LangChain Document
-                    drawing = doc.metadata.get("drawing_name", "Unknown")
-                    st.write(f"**Drawing:** {drawing}")
-                    try:
-                        st.json(json.loads(doc.page_content))  # Attempt to load JSON if possible
-                    except Exception:
-                        st.write(doc.page_content)  # Otherwise, display as plain text
-                    img_path = doc.metadata.get("drawing_path", "")
-                    if img_path and os.path.exists(img_path):
-                        st.image(Image.open(img_path), width=400)
-                else:
-                    st.write("Error: Expected a LangChain Document, but got a different type.")
-
-        except Exception as e:
-            st.error(f"Search failed: {e}")
+        results = st.session_state.compression_retriever.invoke(query)
+        st.write(results)
+        st.write("found result")
+        st.markdown("### Retrieved Documents:")
+        for doc in results:
+            drawing = doc.metadata.get("drawing_name", "Unknown")
+            st.write(f"**Drawing:** {drawing}")
+            try:
+                st.json(json.loads(doc.page_content))
+            except Exception:
+                st.write(doc.page_content)
+            img_path = doc.metadata.get("drawing_path", "")
+            if img_path and os.path.exists(img_path):
+                st.image(Image.open(img_path), width=400)
+        
 
 st.write("Streamlit app finished processing.")
