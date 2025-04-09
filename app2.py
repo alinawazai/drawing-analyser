@@ -276,14 +276,23 @@ def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_ima
             image_path = os.path.join(high_res_image_dir, image_name)
             zipf.write(image_path, os.path.join("high_res_images", image_name))
 
-    # Clean up temporary files
+    # Clean up temporary files with debugging output
     for temp_file in os.listdir(temp_dir):
         temp_file_path = os.path.join(temp_dir, temp_file)
-        os.remove(temp_file_path)
-
-    os.rmdir(temp_dir)  # Remove the temporary directory
+        # Debug: Print the file path before removing
+        print(f"Attempting to remove: {temp_file_path}")
+        try:
+            if os.path.exists(temp_file_path):  # Ensure the file exists before removing
+                os.remove(temp_file_path)
+            else:
+                print(f"File not found: {temp_file_path}")
+        except Exception as e:
+            print(f"Failed to remove {temp_file_path}: {e}")
     
+    os.rmdir(temp_dir)  # Remove the temporary directory
+
     return zip_file_path
+
 
 
 
