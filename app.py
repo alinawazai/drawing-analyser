@@ -334,7 +334,8 @@ if uploaded_pdf and not st.session_state.processed:
         uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
         vector_store.add_documents(documents=gemini_documents, ids=uuids)
         log_message("Vector store built and documents indexed.")
-
+        shutil.rmtree(LOW_RES_DIR)
+        shutil.rmtree(HIGH_RES_DIR)
         log_message("Setting up retrievers...")
         bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
         retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
