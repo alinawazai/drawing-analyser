@@ -11,6 +11,7 @@ except RuntimeError:
 
 import os
 import json
+import shutil
 import time
 import glob
 import logging
@@ -76,14 +77,21 @@ if "processed" not in st.session_state:
 # Pipeline Functions (Sequential Version)
 # -------------------------
 
+
 def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
+    # Remove old images if the directory already exists
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir, ignore_errors=True)
+
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
+
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        log_message(f"Created directory: {output_dir}")
+    
+    # Re-create the (now-empty) output directory
+    os.makedirs(output_dir, exist_ok=True)
+    log_message(f"Created directory (cleared if existed): {output_dir}")
 
     try:
         doc = fitz.open(pdf_path)
@@ -92,9 +100,6 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         raise
 
     file_paths = []
-    # Optional: Limit number of pages (e.g., process only first 10 pages) 
-    # max_pages = min(len(doc), 10)
-    # for i in range(max_pages):
     for i in range(len(doc)):
         page = doc[i]
         scale = fixed_length / page.rect.width
@@ -105,6 +110,7 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         pix.save(image_path)
         log_message(f"Saved image: {image_path}")
         file_paths.append(image_path)
+
     doc.close()
     log_message("PDF conversion completed.")
     return file_paths
