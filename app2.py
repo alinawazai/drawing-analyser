@@ -247,32 +247,47 @@ def save_vector_store(vector_store, filename):
         pickle.dump(vector_store.docstore, f)  # Save the docstore separately
     return filename
 
-# Function to load the FAISS vector store from the uploaded file
+# # Function to load the FAISS vector store from the uploaded file
+# def load_vector_store(uploaded_file):
+#     # Read the uploaded file's content as bytes
+#     file_content = uploaded_file.getvalue()
+    
+#     # Save the uploaded content to a temporary file to use it with FAISS
+#     temp_file_path = os.path.join(DATA_DIR, "temp_vector_store.index")
+#     with open(temp_file_path, "wb") as temp_file:
+#         temp_file.write(file_content)
+
+#     # Load the FAISS index
+#     faiss_index = faiss.read_index(temp_file_path)
+    
+#     # Load the docstore (assuming that it was uploaded as a separate file)
+#     docstore_path = uploaded_file.name.replace(".index", "_docstore.pkl")
+#     with open(docstore_path, "rb") as f:
+#         docstore = pickle.load(f)
+
+#     # Recreate the vector store using the loaded FAISS index and docstore
+#     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+#     vector_store = FAISS(
+#         embedding_function=embeddings,
+#         index=faiss_index,
+#         docstore=docstore,
+#         index_to_docstore_id={}
+#     )
+#     return vector_store
 def load_vector_store(uploaded_file):
     # Read the uploaded file's content as bytes
     file_content = uploaded_file.getvalue()
-    
+
     # Save the uploaded content to a temporary file to use it with FAISS
-    temp_file_path = os.path.join(DATA_DIR, "temp_vector_store.index")
+    temp_file_path = os.path.join(DATA_DIR, "temp_vector_store.pkl")  # Use .pkl extension
     with open(temp_file_path, "wb") as temp_file:
         temp_file.write(file_content)
 
-    # Load the FAISS index
-    faiss_index = faiss.read_index(temp_file_path)
-    
-    # Load the docstore (assuming that it was uploaded as a separate file)
-    docstore_path = uploaded_file.name.replace(".index", "_docstore.pkl")
-    with open(docstore_path, "rb") as f:
-        docstore = pickle.load(f)
+    # Load the pickled vector store (which contains both FAISS index and docstore)
+    with open(temp_file_path, "rb") as f:
+        vector_store = pickle.load(f)
 
-    # Recreate the vector store using the loaded FAISS index and docstore
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-    vector_store = FAISS(
-        embedding_function=embeddings,
-        index=faiss_index,
-        docstore=docstore,
-        index_to_docstore_id={}
-    )
+    # Return the loaded vector store
     return vector_store
 # -------------------------
 # UI Layout
@@ -438,6 +453,7 @@ if uploaded_pdf and st.session_state.processed:
 uploaded_vector_store = st.file_uploader("Upload a vector store", type=["pkl", "index"])
 
 if uploaded_vector_store:
+    os.makedirs(DATA_DIR, exist_ok=True)
     try:
         # Load the vector store from the uploaded files
         loaded_vector_store = load_vector_store(uploaded_vector_store)
