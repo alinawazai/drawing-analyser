@@ -294,7 +294,7 @@ def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_ima
     return zip_file_path
 
 
-
+st.image_dir_for_vector_db= DATA_DIR
 
 def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
     # Create a temporary directory to extract the zip content
