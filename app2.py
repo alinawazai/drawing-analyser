@@ -20,7 +20,7 @@ from langchain.retrievers.contextual_compression import ContextualCompressionRet
 from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import streamlit as st
-from prompts import OCR_PROMPT
+from prompts import OCR_PROMPT, COMBINED_PROMPT
 from google import genai
 import torch
 import nltk
