@@ -276,7 +276,7 @@ async def run_processing_pipeline(pdf_path):
     log_message("Cropping detected regions using high-res images...")
     cropped_data = await crop_and_save_async(detection_results, OUTPUT_DIR)
 
-    ocr_prompt = OCR_PROMPT
+    ocr_prompt = COMBINED_PROMPT
     log_message("Processing images with Gemini OCR...")
     gemini_documents = await process_all_pages_async(cropped_data, ocr_prompt)
 
