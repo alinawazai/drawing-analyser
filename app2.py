@@ -399,12 +399,14 @@ uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
     if uploaded_pdf.name != st.session_state.previous_pdf_uploaded:
+        # Reset the session state for a new PDF upload
         st.session_state.processed = False
         st.session_state.gemini_documents = None
         st.session_state.vector_store = None
-        st.session_state.previous_pdf_uploaded = uploaded_pdf.name
+        st.session_state.compression_retriever = None
+        st.session_state.previous_pdf_uploaded = uploaded_pdf.name  # Store the name of the newly uploaded PDF
 
-    os.makedirs(DATA_DIR, exist_ok=True)  
+    os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
@@ -412,15 +414,17 @@ if uploaded_pdf:
 
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
-        log_message("Starting pipeline...")
-        ocr_prompt = COMBINED_PROMPT
-        gemini_documents, vector_store = asyncio.run(run_pipeline(pdf_path, ocr_prompt))
+        log_message("PDF uploaded successfully. Starting the pipeline...")
 
-        # Update session state
+        # Run the processing pipeline asynchronously
+        ocr_prompt = COMBINED_PROMPT
+        gemini_documents, vector_store = asyncio.run(run_pipeline(pdf_path))
+
+        # Update session state with processed data
         st.session_state.gemini_documents = gemini_documents
         st.session_state.vector_store = vector_store
         st.session_state.processed = True
-        log_message("Processing completed.")
+        log_message("Processing pipeline completed.")
         
     
 # Vector Store Download Button
