@@ -72,8 +72,6 @@ Return a single JSON object with the following fields:
                 "Revision_Number": 0,
                 "Scale": "Scale of Drawing",
                 "Architects": ["Architect Name(s)"],
-                "Notes_on_Drawing": "Notes/annotations on drawing",
-                "Table_on_Drawing": "Markdown formatted table if applicable"
             },
             "Additional_Details": {
                 "Number_of_Units": 0,
@@ -237,8 +235,6 @@ Example Output:
                     "Revision_Number": 0,
                     "Scale": "A1 : 1/100, A3 : 1/200",
                     "Architects": ["Unknown"],
-                    "Notes_on_Drawing": "N/A",
-                    "Table_on_Drawing": ""
                 },
                 "Additional_Details": {
                     "Number_of_Units": 0,
@@ -287,8 +283,8 @@ Example Output:
                         }
                     ]
                 },
-                "Notes_on_Drawing": "N/A",
-                "Table_on_Drawing": "N/A",
+                "Notes_on_Drawing": "Notes/annotations on drawing",
+                "Table_on_Drawing": "Markdown formatted table if applicable if available else return N/A",
             }
     ==================================================================================
     GENERAL GUIDELINES:
