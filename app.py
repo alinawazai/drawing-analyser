@@ -36,7 +36,7 @@ from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
 import nltk
-from prompts import COMBINED_PROMPT
+from prompts import COMBINED_PROMPT, COMBINED_PROMPT2
 # Download required NLTK resource if needed.
 try:
     nltk.data.find('tokenizers/punkt_tab')
@@ -386,7 +386,7 @@ if uploaded_pdf and not st.session_state.processed:
         cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
         log_message("Cropping completed.")
 
-        ocr_prompt = COMBINED_PROMPT
+        ocr_prompt = COMBINED_PROMPT2
         log_message("Extracting metadata using Gemini OCR sequentially...")
         gemini_documents = process_all_pages(cropped_data, ocr_prompt)
         log_message("Metadata extraction completed.")
