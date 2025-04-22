@@ -209,6 +209,8 @@ def process_page_with_metadata(page_key, blocks, prompt):
     for block_type, paths in blocks.items():
         if block_type != "Image_Path":
             all_imgs.extend(paths)
+        if block_type == "Image_Path":
+            all_imgs.append(paths)
     if not all_imgs:
         log_message(f"No cropped images for {page_key}")
         return None
