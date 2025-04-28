@@ -566,25 +566,10 @@ def answer_with_rag(question: str):
     prompt = build_rag_prompt(question, retrieved)
 
     # 3. Call Gemini (flash is cheap/fast – switch to 'gemini-1.5-pro' if quality needed)
-    from google.generativeai.types import HarmCategory, HarmBlockThreshold, SafetySetting
-
-    my_safety = [
-        SafetySetting(
-            category=HarmCategory.HARASSMENT,
-            threshold=HarmBlockThreshold.BLOCK_NONE
-        ),
-        SafetySetting(
-            category=HarmCategory.HATE_SPEECH,
-            threshold=HarmBlockThreshold.BLOCK_NONE
-        ),
-    ]
-
     gemini_response = client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash",
         contents=[prompt],
-        safety_settings=my_safety
     )
-
     answer_text = gemini_response.text.strip()
 
     return answer_text, retrieved
