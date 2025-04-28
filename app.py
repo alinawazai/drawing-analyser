@@ -622,9 +622,9 @@ def build_answer_prompt(user_q: str, docs):
 
 # 4 ─── Two-stage RAG pipeline
 def answer_with_rag(user_q: str):
-    logging.info("Searching...")
+    log_message("Searching...")
     retrieval_q = reformulate_query(user_q)
-    logging.info(f"Retrieval query: {retrieval_q}")
+    log_message(f"Retrieval query: {retrieval_q}")
     docs = retrieve_docs(retrieval_q)
 
     if not docs:
