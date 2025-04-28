@@ -364,7 +364,7 @@ def classify_query(q: str) -> dict:
     ]
 
     resp = client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash",
         contents=few_shots + [{"role": "user", "content": q}],
         generation_config={"response_mime_type": "application/json"}
     )
