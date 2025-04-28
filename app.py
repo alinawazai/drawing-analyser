@@ -534,31 +534,93 @@ def reformulate_query(original_q: str) -> str:
     Falls back to the original question if parsing fails.
     """
     # Updated system prompt to guide Gemini on what technical terms to focus on
-    system = (
-        "You are a search assistant.\n"
-        "Rewrite the user's question so it can be used as an effective retrieval query. "
-        "The goal is to make the question concise, clear, and relevant for retrieving documents from the vector DB. "
-        "Remove unnecessary words like pronouns and page numbers, while keeping technical terms that are essential for retrieval.\n\n"
+    system = textwrap.dedent("""
+        You are a highly skilled civil-engineering assistant specializing in architectural drawings and project specifications.
+        Your task is to answer the user's question using **only** the relevant information from the sources provided.
         
-        "The chunks in my vector DB contain detailed metadata about architectural drawings, including the following technical terms:\n"
-        "1. Drawing Number\n"
-        "2. Project Title\n"
-        "3. Drawing Title\n"
-        "4. Scale\n"
-        "5. Purpose of Building (e.g., Residential, Commercial)\n"
-        "6. Client Name\n"
-        "7. Space Classification (e.g., Communal, Private, Service)\n"
-        "8. Revision Number\n"
-        "9. Architects\n"
-        "10. Additional Notes on the Drawing\n\n"
+        Please follow these steps:
+        
+        1. **Rewrite the user query** to make it concise, clear, and relevant for retrieving documents from the vector DB. Remove unnecessary words (like pronouns and page numbers), and focus on the **important technical terms**.
+        2. Return the **answer in JSON format**, with only the relevant data based on the query. The format should look like the following example, and you should only include the fields that are relevant to the user's question.
 
-        "Please focus on keeping these terms intact while simplifying the rest of the question. "
-        "Remove page numbers, extra spaces, and unnecessary characters.\n\n"
+        Example of the JSON format:
+        ```json
+        {
+            "Drawing_Type": "Floor_Plan",
+            "Purpose_of_Building": "Residential",
+            "Client_Name": "둔촌주공아파트주택 재건축정비사업조합",
+            "Project_Title": "둔촌주공아파트 주택재건축정비사업",
+            "Drawing_Title": "분상상가-1 지하3층 평면도 (근린생활시설-3)",
+            "Space_Classification": {
+                "Communal": ["hallways", "lounges", "staircases", "elevator lobbies"],
+                "Private": ["bedrooms", "bathrooms"],
+                "Service": ["kitchens", "utility rooms", "storage"]
+            },
+            "Details": {
+                "Drawing_Number": "A51-2002",
+                "Project_Number": "N/A",
+                "Revision_Number": 0,
+                "Scale": "A1 : 1/100, A3 : 1/200",
+                "Architects": ["Unknown"]
+            },
+            "Additional_Details": {
+                "Number_of_Units": 0,
+                "Number_of_Stairs": 2,
+                "Number_of_Elevators": 2,
+                "Number_of_Hallways": 1,
+                "Unit_Details": [],
+                "Stairs_Details": [
+                    {
+                        "Location": "Near entrance",
+                        "Purpose": "Access to upper floors"
+                    }
+                ],
+                "Elevator_Details": [
+                    {
+                        "Location": "Near stairs",
+                        "Purpose": "Vertical transportation"
+                    }
+                ],
+                "Hallways": [
+                    {
+                        "Location": "Connects bathrooms and offices",
+                        "Approx_Area": "N/A"
+                    }
+                ],
+                "Other_Common_Areas": [
+                    {
+                        "Area_Name": "Lobby",
+                        "Approx_Area": "N/A"
+                    },
+                    {
+                        "Area_Name": "Sunken garden",
+                        "Approx_Area": "N/A"
+                    }
+                ]
+            },
+            "Notes_on_Drawing": "Notes/annotations on drawing",
+            "Table_on_Drawing": "Markdown formatted table if applicable, if available; otherwise, return N/A"
+        }
+        ```
 
-        "Here is the original user query:\n"
-        f"User: {original_q}\n\n"
-        "Rewritten Query: "
-    )
+        ### Now, use only **relevant fields** and **values** that match the user's question. 
+        ### For example, if the user asks about the "Drawing Number", the response could look like this:
+        ```json
+        {
+            "Drawing_Number": "A51-2002"
+        }
+        ```
+        
+        The format **must** be consistent with the structure above and **only include the relevant data**.
+
+        Here is the original user query:
+        ```
+        User: {original_q}
+        ```
+
+        Rewritten Query: 
+    """)
+
 
     try:
         # Call Gemini to reformulate the query
@@ -603,12 +665,20 @@ def build_answer_prompt(user_q: str, docs):
         context_parts.append(f"### Source {i}\n{snippet}")
 
     context_block = "\n\n".join(context_parts)
-
     system_msg = textwrap.dedent("""
-        You are an expert civil-engineering assistant.
-        • Answer the user's question using ONLY the sources below.
-        • Cite sources like [1], [2].  If information is missing, say 
-          "I couldn’t find that information." – do NOT guess.
+        You are a highly skilled civil-engineering assistant specializing in architectural drawings and project specifications. 
+        Your task is to answer the user's question using only the relevant information provided in the sources below. 
+        Please adhere to the following guidelines:
+        
+        • Respond concisely and precisely, based on the information available in the sources.
+        • Always cite the relevant sources by using their reference numbers, e.g., [1], [2].
+        • If the answer is not available in the provided sources, clearly state: 
+        "I couldn't find that information" — do not make assumptions or fabricate details.
+        • Avoid including irrelevant or unnecessary details in your answers. Focus only on what's essential and relevant to the question.
+        • If you need to use specific technical terms, ensure they are accurate and aligned with the project’s terminology (e.g., drawing number, project title, scale).
+
+        Ensure your response is clear, informative, and based strictly on the context from the sources. 
+        If the question is ambiguous or cannot be fully answered with the sources, indicate so transparently.
     """).strip()
 
     return f"{system_msg}\n\n{context_block}\n\n### Question\n{user_q}\n\n### Answer"
