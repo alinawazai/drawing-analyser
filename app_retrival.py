@@ -491,109 +491,31 @@ if uploaded_vector_store:
         st.error(f"Failed to load vector store: {e}")
 
 st.title("Chat Interface")
-# st.info("Enter your query below")
-# query = st.text_input("Query Here:")
-# if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
-#     if query:
-#         st.write("Searching...")
-#         try:
-#             results = st.session_state.compression_retriever.invoke(query)
-#             st.markdown("### Retrieved Documents:")
-#             for doc in results:
-#                 drawing = doc.metadata.get("drawing_name", "Unknown")
-#                 st.write(f"**Drawing:** {drawing}")
-#                 try:
-#                     st.json(json.loads(doc.page_content))
-#                 except Exception:
-#                     st.write(doc.page_content)
-#                 img_path = doc.metadata.get("drawing_path", "")
-#                 extraction_dir=DATA_DIR
-#                 img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
-#                 if img_path and os.path.exists(img_path):
-#                     st.image(Image.open(img_path), width=400)
-#                 elif img_path2 and os.path.exists(img_path2):
-#                     st.image(Image.open(img_path2), width=400)
-#                 else:
-#                     st.write(img_path2)
-#         except Exception as e:
-#             st.error(f"Search failed: {e}")
+st.info("Enter your query below")
+query = st.text_input("Query Here:")
+if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
+    if query:
+        st.write("Searching...")
+        try:
+            results = st.session_state.compression_retriever.invoke(query)
+            st.markdown("### Retrieved Documents:")
+            for doc in results:
+                drawing = doc.metadata.get("drawing_name", "Unknown")
+                st.write(f"**Drawing:** {drawing}")
+                try:
+                    st.json(json.loads(doc.page_content))
+                except Exception:
+                    st.write(doc.page_content)
+                img_path = doc.metadata.get("drawing_path", "")
+                extraction_dir=DATA_DIR
+                img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
+                if img_path and os.path.exists(img_path):
+                    st.image(Image.open(img_path), width=400)
+                elif img_path2 and os.path.exists(img_path2):
+                    st.image(Image.open(img_path2), width=400)
+                else:
+                    st.write(img_path2)
+        except Exception as e:
+            st.error(f"Search failed: {e}")
 
-# st.write("Streamlit app finished processing.")
-
-# ---------------------------------------
-# Chat Interface (LLM-powered Q&A)
-# ---------------------------------------
-import textwrap
-
-# Initialise chat history once
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []          # ← [{"role":"user"/"assistant","content":str}, …]
-
-st.title("Drawing-AI Chat")
-user_query = st.chat_input("Ask about the drawing, specification…")
-
-def build_rag_prompt(question: str, docs):
-    """
-    Join the top-k retrieved documents into a single context chunk
-    small enough for Gemini-1.5-Flash (≈ 16 k tokens window).
-    """
-    context_blocks = []
-    running_len = 0
-    for i, d in enumerate(docs, start=1):
-        # Keep only the first 2 000 characters of each doc (enough for most metadata pages)
-        snippet = d.page_content[:2000]
-        running_len += len(snippet)
-        if running_len > 12000:           # leave room for instructions + user question
-            break
-        context_blocks.append(f"### Source {i}\n{snippet}")
-    context = "\n\n".join(context_blocks)
-
-    system_msg = textwrap.dedent(f"""
-        You are an expert civil-engineering assistant. 
-        Answer the user's question **ONLY** from the given sources.
-        If the answer is not present, say you don’t know – do not hallucinate.
-        Cite the source number(s) you relied on in square brackets, e.g. [1], [2].
-    """).strip()
-
-    prompt = f"{system_msg}\n\n{context}\n\n### Question\n{question}\n\n### Answer"
-    return prompt
-
-def answer_with_rag(question: str):
-    # 1. Retrieve & compress
-    retrieved = st.session_state.compression_retriever.invoke(question)
-
-    # 2. Build Gemini prompt
-    prompt = build_rag_prompt(question, retrieved)
-
-    # 3. Call Gemini (flash is cheap/fast – switch to 'gemini-1.5-pro' if quality needed)
-    gemini_response = client.models.generate_content(
-        model="gemini-1.5-flash",
-        contents=[prompt],
-        safety_settings={"HARASSMENT": "BLOCK_NONE", "HATE": "BLOCK_NONE"}  # be permissive, drawings are neutral
-    )
-    answer_text = gemini_response.text.strip()
-
-    return answer_text, retrieved
-
-# ---------------- Chat Loop -------------
-if user_query:
-    # Show the user bubble
-    with st.chat_message("user"):
-        st.markdown(user_query)
-
-    # Run RAG → Gemini
-    answer, supporting_docs = answer_with_rag(user_query)
-
-    # Assistant bubble
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-
-        # (optional) expandable raw sources
-        with st.expander("Show retrieved context"):
-            for i, d in enumerate(supporting_docs, 1):
-                st.markdown(f"**Source {i}** – *{d.metadata.get('drawing_name','?')}*")
-                st.code(d.page_content[:1500], language="json")
-
-    # Append to history
-    st.session_state.chat_history.append({"role": "user", "content": user_query})
-    st.session_state.chat_history.append({"role": "assistant", "content": answer})
+st.write("Streamlit app finished processing.")
