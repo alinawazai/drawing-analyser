@@ -622,30 +622,25 @@ def reformulate_query(original_q: str) -> str:
     """)
 
 
-    try:
-        # Call Gemini to reformulate the query
-        resp = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[system],
-        )
+    # Call Gemini to reformulate the query
+    resp = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[system],
+    )
 
-        # Extract the rewritten query from the Gemini response
-        rewritten_query = resp.text.strip()
+    # Extract the rewritten query from the Gemini response
+    rewritten_query = resp.text.strip()
 
-        # Log the reformulated query for debugging
-        # log_message(f"Reformulated query: {str(rewritten_query)}")
-        if rewritten_query.startswith("```"):
-            rewritten_query = rewritten_query.replace("```", "").strip()
-            if rewritten_query.lower().startswith("json"):
-                rewritten_query = rewritten_query[4:].strip()
-                log_message(f"Rewritten query: {rewritten_query}")
+    # Log the reformulated query for debugging
+    # log_message(f"Reformulated query: {str(rewritten_query)}")
+    if rewritten_query.startswith("```"):
+        rewritten_query = rewritten_query.replace("```", "").strip()
+        if rewritten_query.lower().startswith("json"):
+            rewritten_query = rewritten_query[4:].strip()
+            log_message(f"Rewritten query: {rewritten_query}")
 
-        # Return the rewritten query, fallback to original if not found
-        return rewritten_query if rewritten_query else original_q
-    except Exception as e:
-        # If an error occurs, log it and return the original query
-        log_message(f"Error reformulating query: {e}", "ERROR")
-        return original_q  # fallback to original query if error occurs
+    # Return the rewritten query, fallback to original if not found
+    return rewritten_query if rewritten_query else original_q
     
 
 # 2 ─── Retrieve docs with the rewritten query
