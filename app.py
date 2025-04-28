@@ -431,7 +431,7 @@ def answer_with_rag(question: str):
                 else "I couldn’t find any information related to your question."), []
     prompt = build_prompt(question, docs, meta)
     resp = client.models.generate_content(
-        model="gemini-1.5-pro",
+        model="gemini-2.0-flash",
         contents=[prompt]
     )
     return resp.text.strip(), docs
