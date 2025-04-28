@@ -633,7 +633,7 @@ def reformulate_query(original_q: str) -> str:
         rewritten_query = resp.text.strip()
 
         # Log the reformulated query for debugging
-        log_message(f"Reformulated query: {rewritten_query}")
+        log_message(f"Reformulated query: {str(rewritten_query)}")
 
         # Return the rewritten query, fallback to original if not found
         return rewritten_query if rewritten_query else original_q
@@ -688,7 +688,7 @@ def build_answer_prompt(user_q: str, docs):
 def answer_with_rag(user_q: str):
     log_message("Searching...")
     retrieval_q = reformulate_query(user_q)
-    log_message(f"Retrieval query: {retrieval_q}")
+    log_message(f"Retrieval query: {str(retrieval_q)}")
     docs = retrieve_docs(retrieval_q)
 
     if not docs:
