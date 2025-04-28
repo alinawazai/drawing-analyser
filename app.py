@@ -580,12 +580,10 @@ def reformulate_query(original_q: str) -> str:
         contents=[system + "\n\nUser: " + original_q],
     )
 
-    try:
-        data = json.loads(resp.text)
-        return data.get("rewritten_query", original_q)
-    except Exception:
-        return original_q  # fallback
-
+    data = json.loads(resp.text)
+    log_message(f"Reformulated query: {data.get('rewritten_query', original_q)}")
+    return data.get("rewritten_query", original_q)
+    
 
 # 2 ─── Retrieve docs with the rewritten query
 def retrieve_docs(search_q: str, k: int = 5):
