@@ -490,39 +490,7 @@ if uploaded_vector_store:
     except Exception as e:
         st.error(f"Failed to load vector store: {e}")
 
-st.title("Chat Interface")
-# st.info("Enter your query below")
-# query = st.text_input("Query Here:")
-# if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
-#     if query:
-#         st.write("Searching...")
-#         try:
-#             results = st.session_state.compression_retriever.invoke(query)
-#             st.markdown("### Retrieved Documents:")
-#             for doc in results:
-#                 drawing = doc.metadata.get("drawing_name", "Unknown")
-#                 st.write(f"**Drawing:** {drawing}")
-#                 try:
-#                     st.json(json.loads(doc.page_content))
-#                 except Exception:
-#                     st.write(doc.page_content)
-#                 img_path = doc.metadata.get("drawing_path", "")
-#                 extraction_dir=DATA_DIR
-#                 img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
-#                 if img_path and os.path.exists(img_path):
-#                     st.image(Image.open(img_path), width=400)
-#                 elif img_path2 and os.path.exists(img_path2):
-#                     st.image(Image.open(img_path2), width=400)
-#                 else:
-#                     st.write(img_path2)
-#         except Exception as e:
-#             st.error(f"Search failed: {e}")
 
-# st.write("Streamlit app finished processing.")
-
-# ---------------------------------------
-# Chat Interface (LLM-powered Q&A)
-# ---------------------------------------
 import textwrap
 
 # Initialise chat history once
