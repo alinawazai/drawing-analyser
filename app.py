@@ -530,59 +530,55 @@ import json, textwrap, re
 def reformulate_query(original_q: str) -> str:
     """
     Uses gemini-2.0-flash to turn the user question into a concise
-    search query that maximises recall in the vector DB.
+    search query that maximizes recall in the vector DB.
     Falls back to the original question if parsing fails.
     """
+    # Updated system prompt to guide Gemini on what technical terms to focus on
     system = (
-        """
-        "You are a search-assistant.\n"
-        "Rewrite the user's question so it can be used as a retrieval query.\n"
-        The chunks in my vector DB are JSON objects like this.\n":
-        {
-            "Drawing_Type": "Floor_Plan",
-            "Purpose_of_Building": "Commercial",
-            "Client_Name": "배상승공아파트주택재건축사업조합",
-            "Project_Title": "배상승공아파트 재건축사업",
-            "Drawing_Title": "분상상가-1 지하2층 평면도 (근린생활시설-3)",
-            "Space_Classification": {
-                "Communal": [],
-                "Private": [],
-                "Service": []
-            },
-            "Details": {
-                "Drawing_Number": "A51-2000",
-                "Project_Number": "N/A",
-                "Revision_Number": 0,
-                "Scale": "A1 : 1/100, A3 : 1/200",
-                "Architects": ["SAMOO"]
-            },
-            "Additional_Details": {
-                "Number_of_Units": 0,
-                "Number_of_Stairs": 0,
-                "Number_of_Elevators": 0,
-                "Number_of_Hallways": 0,
-                "Unit_Details": [],
-                "Stairs_Details": [],
-                "Elevator_Details": [],
-                "Hallways": [],
-                "Other_Common_Areas": []
-            },
-            "Notes_on_Drawing": "1. 해당 설계는 동지내부가 포함된 탁시형구조 및 지구단위계획에 따라 미설계될 수 있음.\n2. 해당도면 및 부속 자료는 건축허가 등 절차적 요건을 고려하여 결정할 것."
-        }
-        "Keep it short, and give it a proper structure to maximize the correct retrival, remove pronouns & page numbers, \n"
-        "PLEASE REMOVE EXTRA INFORMATION, SPACES, LINE BREAKS, AND UNNECESSARY CHARACTERS.\n"
-        "and keep important technical terms.\n"
+        "You are a search assistant.\n"
+        "Rewrite the user's question so it can be used as an effective retrieval query. "
+        "The goal is to make the question concise, clear, and relevant for retrieving documents from the vector DB. "
+        "Remove unnecessary words like pronouns and page numbers, while keeping technical terms that are essential for retrieval.\n\n"
         
-        """
-    )
-    resp = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[system + "\n\nUser: " + original_q],
+        "The chunks in my vector DB contain detailed metadata about architectural drawings, including the following technical terms:\n"
+        "1. Drawing Number\n"
+        "2. Project Title\n"
+        "3. Drawing Title\n"
+        "4. Scale\n"
+        "5. Purpose of Building (e.g., Residential, Commercial)\n"
+        "6. Client Name\n"
+        "7. Space Classification (e.g., Communal, Private, Service)\n"
+        "8. Revision Number\n"
+        "9. Architects\n"
+        "10. Additional Notes on the Drawing\n\n"
+
+        "Please focus on keeping these terms intact while simplifying the rest of the question. "
+        "Remove page numbers, extra spaces, and unnecessary characters.\n\n"
+
+        "Here is the original user query:\n"
+        f"User: {original_q}\n\n"
+        "Rewritten Query: "
     )
 
-    data = json.loads(resp.text)
-    log_message(f"Reformulated query: {data.get('rewritten_query', original_q)}")
-    return data.get("rewritten_query", original_q)
+    try:
+        # Call Gemini to reformulate the query
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[system],
+        )
+
+        # Extract the rewritten query from the Gemini response
+        rewritten_query = resp.text.strip()
+
+        # Log the reformulated query for debugging
+        log_message(f"Reformulated query: {rewritten_query}")
+
+        # Return the rewritten query, fallback to original if not found
+        return rewritten_query if rewritten_query else original_q
+    except Exception as e:
+        # If an error occurs, log it and return the original query
+        log_message(f"Error reformulating query: {e}", "ERROR")
+        return original_q  # fallback to original query if error occurs
     
 
 # 2 ─── Retrieve docs with the rewritten query

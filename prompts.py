@@ -311,7 +311,7 @@ Example Output:
 """
 
 questions = """
-         What is the drawing number of this Drawing Title "분산상가-1 지하3층 평면도 (근린생활시설-3)"?
+        What is the drawing number of this Drawing Title "분산상가-1 지하3층 평면도 (근린생활시설-3)"?
         What is the project name of this Drawing Title ""?
         What is the revision of this Drawing Title ""?
         What is the scale of this Drawing Title ""?
