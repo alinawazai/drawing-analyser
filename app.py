@@ -569,7 +569,6 @@ def answer_with_rag(question: str):
     gemini_response = client.models.generate_content(
         model="gemini-2.0-flash",
         contents=[prompt],
-        safety_settings={"HARASSMENT": "BLOCK_NONE", "HATE": "BLOCK_NONE"}  # be permissive, drawings are neutral
     )
     answer_text = gemini_response.text.strip()
 
