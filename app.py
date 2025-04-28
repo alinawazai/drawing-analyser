@@ -34,6 +34,8 @@ from langchain.retrievers import EnsembleRetriever
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
+import re, json, textwrap
+from google.generativeai import configure
 import torch
 import nltk
 from prompts import COMBINED_PROMPT
@@ -341,226 +343,135 @@ def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
     shutil.rmtree(temp_dir)  # Remove the temporary directory
 
     return faiss_index, docstore, documents
-# -------------------------
-# UI Layout
-# -------------------------
-st.sidebar.title("PDF Processing")
-# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
-# [server]
-# fileWatcherType = "none"
+# ───────────────────────────────────────
+# 1.  Intent & Scope Classification
+# ───────────────────────────────────────
+def classify_query(q: str) -> dict:
+    """
+    Returns JSON with keys:
+      type  : 'page_specific' | 'drawing_general' | 'other'
+      page  : '3' or None
+      language : 'ko' | 'en' | …
+      detail : 'short' | 'normal' | 'deep'
+    """
+    few_shots = [
+        {"role": "user", "content": "what is the drawing title on page 5?"},
+        {"role": "assistant", "content": '{"type":"page_specific","page":"5","language":"en","detail":"short"}'},
+        {"role": "user", "content": "이 도면이 어떤 시설을 나타내나요?"},
+        {"role": "assistant", "content": '{"type":"drawing_general","page":null,"language":"ko","detail":"normal"}'},
+        {"role": "user", "content": "summarise the whole pdf in 5 bullet points"},
+        {"role": "assistant", "content": '{"type":"other","page":null,"language":"en","detail":"deep"}'}
+    ]
 
-# Track if a new PDF is uploaded
-uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
-
-# Reset the session state when a new PDF is uploaded
-if uploaded_pdf:
-    if uploaded_pdf.name != st.session_state.previous_pdf_uploaded:
-        # Reset the session state for a new PDF upload
-        st.session_state.processed = False
-        st.session_state.gemini_documents = None
-        st.session_state.vector_store = None
-        st.session_state.compression_retriever = None
-        st.session_state.previous_pdf_uploaded = uploaded_pdf.name  # Store the name of the newly uploaded PDF
-
-    os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
-    pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
-    with open(pdf_path, "wb") as f:
-        f.write(uploaded_pdf.getbuffer())
-    st.sidebar.success("PDF uploaded successfully.")
-
-if uploaded_pdf and not st.session_state.processed:
-    if st.sidebar.button("Run Processing Pipeline"):
-        log_message("PDF uploaded successfully.")
-
-        log_message("Converting PDF to images sequentially...")
-        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
-        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
-        log_message("PDF conversion completed.")
-        # uploaded_pdf = None
-        log_message("Running YOLO detection on low-res images...")
-        yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
-        detection_results = yolo_model.predict_batch(LOW_RES_DIR)
-        log_message("Block detection completed.")
-
-        log_message("Cropping detected regions using high-res images...")
-        cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
-        log_message("Cropping completed.")
-
-        ocr_prompt = COMBINED_PROMPT
-        log_message("Extracting metadata using Gemini OCR sequentially...")
-        gemini_documents = process_all_pages(cropped_data, ocr_prompt)
-        log_message("Metadata extraction completed.")
-        gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
-        with open(gemini_json_path, "w") as f:
-            json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
-        log_message("Gemini documents saved.")
-
-        log_message("Building vector store for semantic search...")
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        example_embedding = embeddings.embed_query("sample text")
-        d = len(example_embedding)
-        index = faiss.IndexFlatL2(d)
-        vector_store = FAISS(
-            embedding_function=embeddings,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={}
-        )
-        uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
-        vector_store.add_documents(documents=gemini_documents, ids=uuids)
-        log_message("Vector store built and documents indexed.")
-
-        log_message("Setting up retrievers...")
-        bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
-        log_message("Setting up RAG pipeline...")
-        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
-        log_message("RAG pipeline set up.")
-        st.session_state.processed = True
-        st.session_state.gemini_documents = gemini_documents
-        st.session_state.vector_store = vector_store
-        st.session_state.compression_retriever = compression_retriever
-        log_message("Processing pipeline completed.")
-
-if uploaded_pdf and st.session_state.processed:
-    # Add the "Download Vector Store" button
-    vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store.zip")
-
-    if st.button("Download Vector Store"):
-        # Save the FAISS index and docstore into a zip file with images
-        zip_file_path = save_vector_store_as_zip(
-            st.session_state.vector_store, 
-            st.session_state.gemini_documents, 
-            os.path.join(DATA_DIR, vector_store_filename)
-        )
-        
-        # Offer the zip file for download
-        with open(zip_file_path, "rb") as f:
-            zip_data = f.read()
-
-        st.download_button(
-            label="Download FAISS Vector Store as Zip",
-            data=zip_data,
-            file_name=vector_store_filename,
-            mime="application/zip"
-        )
-
-# Add the "Upload Vector Store" button
-uploaded_vector_store = st.file_uploader("Upload a vector store", type=[".zip"])
-
-if uploaded_vector_store:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    resp = client.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=few_shots + [{"role": "user", "content": q}],
+        generation_config={"response_mime_type": "application/json"}
+    )
     try:
-        # Load the vector store from the uploaded files, including high-res images
-        faiss_index, inmdocs, docs = load_vector_store_from_zip(uploaded_vector_store)
-
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        example_embedding = embeddings.embed_query("sample text")
-        d = len(example_embedding)
-        index = faiss.IndexFlatL2(d)
-        vector_store = FAISS(
-            embedding_function=embeddings,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={}
-        )
-        uuids = [str(uuid4()) for _ in range(len(docs))]
-        vector_store.add_documents(documents=docs, ids=uuids)
-        st.session_state.vector_store = vector_store
-        bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
-        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
-        st.session_state.compression_retriever = compression_retriever
-
-        st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
-    except Exception as e:
-        st.error(f"Failed to load vector store: {e}")
+        return json.loads(resp.text)
+    except Exception:
+        return {"type": "other", "page": None, "language": "en", "detail": "normal"}
 
 
-import textwrap
+# ───────────────────────────────────────
+# 2.  Targeted Retrieval Router
+# ───────────────────────────────────────
+def retrieve_for_intent(q: str, meta: dict, k_sim: int = 5):
+    t = meta["type"]
+    if t == "page_specific" and meta["page"]:
+        page_tag = f"_page_{meta['page']}"
+        docs = [d for d in st.session_state.gemini_documents
+                if page_tag in d.metadata.get("drawing_name", "")]
+        return docs[:1]                       # exact page or empty
+    elif t == "drawing_general":
+        return st.session_state.compression_retriever.invoke(q)[:3]
+    else:
+        return st.session_state.compression_retriever.invoke(q)[:k_sim]
 
-# Initialise chat history once
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []          # ← [{"role":"user"/"assistant","content":str}, …]
 
-st.title("Drawing-AI Chat")
-user_query = st.chat_input("Ask about the drawing, specification…")
+# ───────────────────────────────────────
+# 3.  Prompt Builder
+# ───────────────────────────────────────
+def build_prompt(q: str, docs, meta: dict) -> str:
+    ctx_parts = []
+    for i, d in enumerate(docs, 1):
+        try:
+            pretty = json.dumps(json.loads(d.page_content),
+                                ensure_ascii=False, indent=2)
+        except Exception:
+            pretty = d.page_content
+        ctx_parts.append(f"### Source {i}\n{pretty}")
+    context_block = "\n\n".join(ctx_parts)[:14000]  # leave head-room
 
-def build_rag_prompt(question: str, docs):
-    """
-    Join the top-k retrieved documents into a single context chunk
-    small enough for Gemini-1.5-Flash (≈ 16 k tokens window).
-    """
-    context_blocks = []
-    running_len = 0
-    for i, d in enumerate(docs, start=1):
-        # Keep only the first 2 000 characters of each doc (enough for most metadata pages)
-        snippet = d.page_content[:2000]
-        running_len += len(snippet)
-        if running_len > 12000:           # leave room for instructions + user question
-            break
-        context_blocks.append(f"### Source {i}\n{snippet}")
-    context = "\n\n".join(context_blocks)
+    lang = "Korean" if meta["language"] == "ko" else "English"
+    detail = meta["detail"]
 
-    system_msg = textwrap.dedent(f"""
-        You are an expert civil-engineering assistant. 
-        Answer the user's question **ONLY** from the given sources.
-        If the answer is not present, say you don’t know – do not hallucinate.
-        Cite the source number(s) you relied on in square brackets, e.g. [1], [2].
+    system = textwrap.dedent(f"""
+        You are a senior civil-engineering CAD expert.
+        Answer **only** from the provided sources; cite as [1], [2] …
+        Language: {lang}.  Depth: {detail}.
+        If the answer is not present, reply:
+        - Korean: "해당 정보를 찾을 수 없습니다."
+        - English: "I couldn’t find that information."
     """).strip()
 
-    prompt = f"{system_msg}\n\n{context}\n\n### Question\n{question}\n\n### Answer"
-    return prompt
+    return f"{system}\n\n{context_block}\n\n### Question\n{q}\n\n### Answer"
 
+
+# ───────────────────────────────────────
+# 4.  RAG Answer Generator
+# ───────────────────────────────────────
 def answer_with_rag(question: str):
-    # 1. Retrieve & compress
-    retrieved = st.session_state.compression_retriever.invoke(question)
-
-    # 2. Build Gemini prompt
-    prompt = build_rag_prompt(question, retrieved)
-
-    # 3. Call Gemini (flash is cheap/fast – switch to 'gemini-1.5-pro' if quality needed)
-    gemini_response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[prompt],
+    meta = classify_query(question)
+    docs = retrieve_for_intent(question, meta)
+    if not docs:
+        return ("해당 정보를 찾을 수 없습니다."
+                if meta["language"] == "ko"
+                else "I couldn’t find any information related to your question."), []
+    prompt = build_prompt(question, docs, meta)
+    resp = client.models.generate_content(
+        model="gemini-1.5-pro",
+        contents=[prompt]
     )
-    answer_text = gemini_response.text.strip()
+    return resp.text.strip(), docs
 
-    return answer_text, retrieved
 
-# ---------------- Chat Loop -------------
+# ───────────────────────────────────────
+# 5.  Chat UI
+# ───────────────────────────────────────
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+st.title("Drawing-AI Chat")
+
+user_query = st.chat_input("Ask about the drawing, specification …")
+
 if user_query:
-    # Show the user bubble
+    # user bubble
     with st.chat_message("user"):
         st.markdown(user_query)
 
-    # Run RAG → Gemini
-    answer, supporting_docs = answer_with_rag(user_query)
+    # run pipeline
+    answer_text, source_docs = answer_with_rag(user_query)
 
-    # Assistant bubble
+    # assistant bubble
     with st.chat_message("assistant"):
-        st.markdown(answer)
+        st.markdown(answer_text)
 
-        # (optional) expandable raw sources
-        with st.expander("Show retrieved context"):
-            for i, d in enumerate(supporting_docs, 1):
-                st.markdown(f"**Source {i}** – *{d.metadata.get('drawing_name','?')}*")
-                st.code(d.page_content[:1500], language="json")
+        if source_docs:
+            with st.expander("🔍 Sources"):
+                for i, d in enumerate(source_docs, 1):
+                    st.markdown(f"**[{i}]** *{d.metadata.get('drawing_name','?')}*")
 
-    # Append to history
-    st.session_state.chat_history.append({"role": "user", "content": user_query})
-    st.session_state.chat_history.append({"role": "assistant", "content": answer})
+    # remember chat
+    st.session_state.chat_history.append(
+        {"role": "user", "content": user_query}
+    )
+    st.session_state.chat_history.append(
+        {"role": "assistant", "content": answer_text}
+    )
+
+# ---------------------------------------
+# End of script
+# ---------------------------------------
