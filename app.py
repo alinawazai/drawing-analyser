@@ -392,7 +392,7 @@ if uploaded_pdf and not st.session_state.processed:
         log_message("Metadata extraction completed.")
         gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
         with open(gemini_json_path, "w") as f:
-            json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
+            json.dump([doc.dict() for doc in gemini_documents], f, indent=4, ensure_ascii=False)
         log_message("Gemini documents saved.")
 
         log_message("Building vector store for semantic search...")
@@ -534,11 +534,46 @@ def reformulate_query(original_q: str) -> str:
     Falls back to the original question if parsing fails.
     """
     system = (
+        """
         "You are a search-assistant.\n"
         "Rewrite the user's question so it can be used as a retrieval query.\n"
-        "Keep it short (≤25 words), remove pronouns & page numbers, "
+        The chunks in my vector DB are JSON objects like this.\n":
+        {
+            "Drawing_Type": "Floor_Plan",
+            "Purpose_of_Building": "Commercial",
+            "Client_Name": "배상승공아파트주택재건축사업조합",
+            "Project_Title": "배상승공아파트 재건축사업",
+            "Drawing_Title": "분상상가-1 지하2층 평면도 (근린생활시설-3)",
+            "Space_Classification": {
+                "Communal": [],
+                "Private": [],
+                "Service": []
+            },
+            "Details": {
+                "Drawing_Number": "A51-2000",
+                "Project_Number": "N/A",
+                "Revision_Number": 0,
+                "Scale": "A1 : 1/100, A3 : 1/200",
+                "Architects": ["SAMOO"]
+            },
+            "Additional_Details": {
+                "Number_of_Units": 0,
+                "Number_of_Stairs": 0,
+                "Number_of_Elevators": 0,
+                "Number_of_Hallways": 0,
+                "Unit_Details": [],
+                "Stairs_Details": [],
+                "Elevator_Details": [],
+                "Hallways": [],
+                "Other_Common_Areas": []
+            },
+            "Notes_on_Drawing": "1. 해당 설계는 동지내부가 포함된 탁시형구조 및 지구단위계획에 따라 미설계될 수 있음.\n2. 해당도면 및 부속 자료는 건축허가 등 절차적 요건을 고려하여 결정할 것."
+        }
+        "Keep it short, and give it a proper structure to maximize the correct retrival, remove pronouns & page numbers, \n"
+        "PLEASE REMOVE EXTRA INFORMATION, SPACES, LINE BREAKS, AND UNNECESSARY CHARACTERS.\n"
         "and keep important technical terms.\n"
-        "Respond ONLY in JSON: {\"rewritten_query\": \"...\"}"
+        
+        """
     )
     resp = client.models.generate_content(
         model="gemini-2.0-flash",
@@ -587,7 +622,9 @@ def build_answer_prompt(user_q: str, docs):
 
 # 4 ─── Two-stage RAG pipeline
 def answer_with_rag(user_q: str):
+    logging.info("Searching...")
     retrieval_q = reformulate_query(user_q)
+    logging.info(f"Retrieval query: {retrieval_q}")
     docs = retrieve_docs(retrieval_q)
 
     if not docs:
