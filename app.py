@@ -543,7 +543,6 @@ def reformulate_query(original_q: str) -> str:
     resp = client.models.generate_content(
         model="gemini-2.0-flash",
         contents=[system + "\n\nUser: " + original_q],
-        generation_config={"response_mime_type": "application/json"}
     )
 
     try:
