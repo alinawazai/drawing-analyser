@@ -490,7 +490,7 @@ if uploaded_vector_store:
     except Exception as e:
         st.error(f"Failed to load vector store: {e}")
 
-st.title("Chat Interface")
+# st.title("Chat Interface")
 # st.info("Enter your query below")
 # query = st.text_input("Query Here:")
 # if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
@@ -523,76 +523,108 @@ st.title("Chat Interface")
 # ---------------------------------------
 # Chat Interface (LLM-powered Q&A)
 # ---------------------------------------
-import textwrap
+# ‹BEGIN NEW CHAT MODULE› ────────────────────────────────────────────────
+import json, textwrap, re
 
-# Initialise chat history once
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []          # ← [{"role":"user"/"assistant","content":str}, …]
-
-st.title("Drawing-AI Chat")
-user_query = st.chat_input("Ask about the drawing, specification…")
-
-def build_rag_prompt(question: str, docs):
+# 1 ─── Few-shot helper: reformulate the user’s question for best recall
+def reformulate_query(original_q: str) -> str:
     """
-    Join the top-k retrieved documents into a single context chunk
-    small enough for Gemini-1.5-Flash (≈ 16 k tokens window).
+    Uses gemini-2.0-flash to turn the user question into a concise
+    search query that maximises recall in the vector DB.
+    Falls back to the original question if parsing fails.
     """
-    context_blocks = []
-    running_len = 0
-    for i, d in enumerate(docs, start=1):
-        # Keep only the first 2 000 characters of each doc (enough for most metadata pages)
-        snippet = d.page_content[:2000]
-        running_len += len(snippet)
-        if running_len > 12000:           # leave room for instructions + user question
+    system = (
+        "You are a search-assistant.\n"
+        "Rewrite the user's question so it can be used as a retrieval query.\n"
+        "Keep it short (≤25 words), remove pronouns & page numbers, "
+        "and keep important technical terms.\n"
+        "Respond ONLY in JSON: {\"rewritten_query\": \"...\"}"
+    )
+    resp = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[system + "\n\nUser: " + original_q],
+        generation_config={"response_mime_type": "application/json"}
+    )
+
+    try:
+        data = json.loads(resp.text)
+        return data.get("rewritten_query", original_q)
+    except Exception:
+        return original_q  # fallback
+
+
+# 2 ─── Retrieve docs with the rewritten query
+def retrieve_docs(search_q: str, k: int = 5):
+    return st.session_state.compression_retriever.invoke(search_q)[:k]
+
+
+# 3 ─── Build the final prompt for Gemini answer
+def build_answer_prompt(user_q: str, docs):
+    context_parts, used_tokens = [], 0
+    for i, d in enumerate(docs, 1):
+        # Pretty-print JSON, keep Unicode readable
+        try:
+            pretty = json.dumps(json.loads(d.page_content),
+                                ensure_ascii=False, indent=2)
+        except Exception:
+            pretty = d.page_content
+        snippet = pretty[:2000]  # trim long docs
+        used_tokens += len(snippet)
+        if used_tokens > 12000:      # leave room for instructions
             break
-        context_blocks.append(f"### Source {i}\n{snippet}")
-    context = "\n\n".join(context_blocks)
+        context_parts.append(f"### Source {i}\n{snippet}")
 
-    system_msg = textwrap.dedent(f"""
-        You are an expert civil-engineering assistant. 
-        Answer the user's question **ONLY** from the given sources.
-        If the answer is not present, say you don’t know – do not hallucinate.
-        Cite the source number(s) you relied on in square brackets, e.g. [1], [2].
+    context_block = "\n\n".join(context_parts)
+
+    system_msg = textwrap.dedent("""
+        You are an expert civil-engineering assistant.
+        • Answer the user's question using ONLY the sources below.
+        • Cite sources like [1], [2].  If information is missing, say 
+          "I couldn’t find that information." – do NOT guess.
     """).strip()
 
-    prompt = f"{system_msg}\n\n{context}\n\n### Question\n{question}\n\n### Answer"
-    return prompt
+    return f"{system_msg}\n\n{context_block}\n\n### Question\n{user_q}\n\n### Answer"
 
-def answer_with_rag(question: str):
-    # 1. Retrieve & compress
-    retrieved = st.session_state.compression_retriever.invoke(question)
 
-    # 2. Build Gemini prompt
-    prompt = build_rag_prompt(question, retrieved)
+# 4 ─── Two-stage RAG pipeline
+def answer_with_rag(user_q: str):
+    retrieval_q = reformulate_query(user_q)
+    docs = retrieve_docs(retrieval_q)
 
-    # 3. Call Gemini (flash is cheap/fast – switch to 'gemini-1.5-pro' if quality needed)
-    gemini_response = client.models.generate_content(
+    if not docs:
+        return "I couldn’t find any information related to your question.", []
+
+    prompt = build_answer_prompt(user_q, docs)
+    resp = client.models.generate_content(
         model="gemini-2.0-flash",
-        contents=[prompt],
+        contents=[prompt]
     )
-    answer_text = gemini_response.text.strip()
+    return resp.text.strip(), docs
 
-    return answer_text, retrieved
 
-# ---------------- Chat Loop -------------
+# 5 ─── Streamlit chat UI
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+st.title("Drawing-AI Chat")
+
+user_query = st.chat_input("Ask about the drawing, specification …")
+
 if user_query:
-    # Show the user bubble
     with st.chat_message("user"):
         st.markdown(user_query)
 
-    # Run RAG → Gemini
-    answer, supporting_docs = answer_with_rag(user_query)
+    answer_text, source_docs = answer_with_rag(user_query)
 
-    # Assistant bubble
     with st.chat_message("assistant"):
-        st.markdown(answer)
+        st.markdown(answer_text)
+        with st.expander("🔍 Sources used"):
+            for i, d in enumerate(source_docs, 1):
+                st.markdown(f"**[{i}]** *{d.metadata.get('drawing_name','?')}*")
+                st.code(d.page_content[:1200], language="json")
 
-        # (optional) expandable raw sources
-        with st.expander("Show retrieved context"):
-            for i, d in enumerate(supporting_docs, 1):
-                st.markdown(f"**Source {i}** – *{d.metadata.get('drawing_name','?')}*")
-                st.code(d.page_content[:1500], language="json")
-
-    # Append to history
-    st.session_state.chat_history.append({"role": "user", "content": user_query})
-    st.session_state.chat_history.append({"role": "assistant", "content": answer})
+    st.session_state.chat_history.extend([
+        {"role": "user", "content": user_query},
+        {"role": "assistant", "content": answer_text}
+    ])
+# ‹END NEW CHAT MODULE› ─────────────────────────────────────────────────
