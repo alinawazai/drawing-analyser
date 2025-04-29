@@ -652,23 +652,21 @@ def reformulate_query(original_q: str) -> str:
         """
     ).strip()
 
-    # Structured content for Gemini request
+    # Create content parts correctly as a list of `types.Part`
     contents = [
-        types.Content(role="system", parts=[system_message]),
-        types.Content(role="user", parts=[original_q])
+        types.Content(role="system", parts=[types.Part(text=system_message)]),  # Correcting part creation
+        types.Content(role="user", parts=[types.Part(text=original_q)])  # Correcting part creation
     ]
 
     resp = client.models.generate_content(
         model="gemini-2.0-flash",
-        contents=contents,  # properly structured contents
+        contents=contents,  # Correctly structured contents
     )
 
     rewritten_query = resp.text.strip()
     log_message(f"Original query: {original_q}")
     log_message(f"Rewritten query: {rewritten_query or original_q}")
     return rewritten_query or original_q
-
-
 
 def retrieve_docs(search_q: str, k: int = 5):
     # Your existing retriever in st.session_state
