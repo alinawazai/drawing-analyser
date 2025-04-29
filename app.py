@@ -540,7 +540,7 @@ if uploaded_vector_store:
 # ───────────────────────────────────────────
 
 # 1. Set page config at the very top
-st.set_page_config(page_title="Drawing-AI Chat", page_icon="📐")
+# st.set_page_config(page_title="Drawing-AI Chat", page_icon="📐")
 
 # 2. Then initialize other Streamlit elements
 st.title("Drawing-AI Chat")
