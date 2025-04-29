@@ -641,25 +641,33 @@ def handle_query(user_q: str) -> Tuple[str, list]:
 # 4.  (UNCHANGED) RAG HELPERS – refactor only if you like
 # ───────────────────────────────────────────
 def reformulate_query(original_q: str) -> str:
-    """Rewrite the user query to maximise recall in the vector DB."""
-    system = textwrap.dedent(
+    """Rewrite the user query to maximize recall in the vector DB."""
+    system_message = textwrap.dedent(
         """
-        You are a highly skilled civil-engineering assistant specialising in
-        architectural drawings and project specifications.
-        Rewrite the user query, keeping only the technical terms needed to find
-        relevant documents.  Return ONLY the rewritten query.
+        You are a highly skilled civil-engineering assistant specializing in architectural drawings and project specifications.
+        Your task is to rewrite the user query to make it concise, clear, and relevant for retrieving documents from the vector DB. 
+        Remove unnecessary words (like pronouns and page numbers), and focus on the **important technical terms**. 
+
+        Return only the rewritten query in the form of a string.
         """
     ).strip()
 
+    # Structured content for Gemini request
+    contents = [
+        types.Content(role="system", parts=[system_message]),
+        types.Content(role="user", parts=[original_q])
+    ]
+
     resp = client.models.generate_content(
         model="gemini-2.0-flash",
-        contents=[{"role": "system", "parts": [system]},
-                  {"role": "user",   "parts": [original_q]}],
+        contents=contents,  # properly structured contents
     )
-    rewritten = resp.text.strip()
-    log_message(f"Original: {original_q}")
-    log_message(f"Rewritten: {rewritten or original_q}")
-    return rewritten or original_q
+
+    rewritten_query = resp.text.strip()
+    log_message(f"Original query: {original_q}")
+    log_message(f"Rewritten query: {rewritten_query or original_q}")
+    return rewritten_query or original_q
+
 
 
 def retrieve_docs(search_q: str, k: int = 5):
