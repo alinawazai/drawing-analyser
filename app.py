@@ -14,9 +14,6 @@ import faiss
 import pickle
 from io import BytesIO
 import json
-
-from __future__ import annotations
-
 import json
 import os
 import textwrap
