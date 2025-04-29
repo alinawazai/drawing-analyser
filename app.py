@@ -538,6 +538,13 @@ if uploaded_vector_store:
 # ───────────────────────────────────────────
 # 1.  CORE BUSINESS LOGIC (UNCHANGED)
 # ───────────────────────────────────────────
+
+# 1. Set page config at the very top
+st.set_page_config(page_title="Drawing-AI Chat", page_icon="📐")
+
+# 2. Then initialize other Streamlit elements
+st.title("Drawing-AI Chat")
+
 def perform_rag(user_query: str) -> Tuple[str, List]:
     """Performs the RAG pipeline to answer drawing-specific questions."""
     log_message("Performing RAG…")
@@ -691,9 +698,6 @@ def build_answer_prompt(user_q: str, docs) -> str:
 def log_message(msg: str) -> None:
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
 
-
-st.set_page_config(page_title="Drawing-AI Chat", page_icon="📐")
-st.title("Drawing-AI Chat")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
