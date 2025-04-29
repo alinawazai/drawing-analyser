@@ -20,7 +20,7 @@ import zipfile
 import logging
 import textwrap
 import random
-import datetime
+from datetime import datetime
 from uuid import uuid4
 from dotenv import load_dotenv
 import streamlit as st
