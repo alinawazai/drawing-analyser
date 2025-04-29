@@ -550,9 +550,9 @@ def perform_rag(user_query: str) -> str:
 # ---------------------------------------------------------------------------
 
 # ---------- create two model instances -------------------------------------
-rag_llm   = genai.GenerativeModel(model_name=MODEL_NAME,
+rag_llm   =  client.models.generate_content(model_name=MODEL_NAME,
                                   tools=[perform_rag])   # <-- tool attached
-plain_llm = genai.GenerativeModel(model_name=MODEL_NAME) # for chit-chat
+plain_llm =  client.models.generate_content(model_name=MODEL_NAME) # for chit-chat
 # attaching tools while constructing the model is the new pattern :contentReference[oaicite:2]{index=2}
 
 # ---------- core router -----------------------------------------------------
