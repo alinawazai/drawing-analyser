@@ -474,7 +474,8 @@ if uploaded_vector_store:
         uuids = [str(uuid4()) for _ in range(len(docs))]
         vector_store.add_documents(documents=docs, ids=uuids)
         st.session_state.vector_store = vector_store
-        bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
+        bm25_retriever = BM25Retriever.from_documents(docs, preprocess_func=word_tokenize)
+        st.session_state.keyword_retriver = bm25_retriever
         retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
         ensemble_retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, retriever_ss],
@@ -539,9 +540,15 @@ def reformulate_query(original_q: str) -> str:
         Your task is to REWRITE the user's question using **only** the relevant information from the sources provided.
         
         Please follow these steps:
-        
-        1. **Rewrite the user query** to make it concise, clear, and relevant for retrieving documents from the vector DB. Remove unnecessary words (like pronouns and page numbers), and focus on the **important technical terms**.
-        2. Return the **answer in JSON format**, with only the relevant data based on the query.Below is an example of how the data is stored, in databse, you need to rewrite the query such that it gives maximum similarity on retrival to relevent document.
+        1.Classify the query in NORMAL, KEYWORD, or SYMANTIC   if the query has some information related to databse like drawing title, drawing type or anything
+        then it is SYMANTIC but if it does not provide any information but ask for something like "How many drawing have elevator?" they it is a KEYWORD type with keyword being elevator
+        2. **Rewrite the user query** to make it concise, clear, and relevant for retrieving documents from the vector DB. Remove unnecessary words (like pronouns and page numbers), and focus on the **important technical terms**.
+        3. Return the DICTIONARY of below format
+        {  "Type": "KEYWORD"
+            "response": str  }
+        if the query is normal like Hello, How are you? or anything NOT RELATED to construction drawing, answer it yourself and put your answer as response
+
+        But if the query is keyword or symatic type then you have to rewrite the query with only the relevant data based on the query and put the new query as response.Below is an example of how the data is stored, in databse, you need to rewrite the query such that it gives maximum similarity on retrival to relevent document.
 
         Example of the JSON format of data in databse:
         ```json
@@ -605,7 +612,8 @@ def reformulate_query(original_q: str) -> str:
 
         ### Now, use only **relevant fields** and **values** that match the user's question. 
         ### For example, if the user asks about the "What is the drawing Drawing Number of title 분상상가-1 지하3층 평면도 (근린생활시설-3) ", the response could look like this:
-        ```json
+        {"type": "SYMANTIC",
+          "response": ```json
         {
             "Project_Title": "분상상가-1 지하3층 평면도 (근린생활시설-3)"
             "Details": {
@@ -614,14 +622,19 @@ def reformulate_query(original_q: str) -> str:
 
         }
         ```
-        ### For example, if the user asks about the "how many drawings have stairs?", the response could look like this:
-         ```json
-        {
-            "Additional_Details": {
-                "Number_of_Stairs": "???"
-            }
         }
-        ```
+        ### For example, if the user asks about the "how many drawings have stairs?", the response could look like this:
+         {"type": "KEYWORD",
+           "response":```json
+        {
+                "Number_of_Stairs": "???"
+        }
+        ```}
+
+        ### For example, if the user asks about the "how are you??", the response could look like this:
+         {"type": "NORMAL",
+         "response": "Hello, I am great! How can I help you?"}
+
         The format **must** be consistent with the structure above and **only include the relevant data**.
 
         Here is the original user query:
@@ -640,6 +653,7 @@ def reformulate_query(original_q: str) -> str:
     )
 
     # Extract the rewritten query from the Gemini response
+    
     rewritten_query = resp.text.strip()
 
     # Log the reformulated query for debugging
