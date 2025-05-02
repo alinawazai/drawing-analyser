@@ -392,7 +392,7 @@ if uploaded_pdf and not st.session_state.processed:
         log_message("Metadata extraction completed.")
         gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
         with open(gemini_json_path, "w") as f:
-            json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
+            json.dump([doc.dict() for doc in gemini_documents], f, indent=4, ensure_ascii=False)
         log_message("Gemini documents saved.")
 
         log_message("Building vector store for semantic search...")
@@ -490,32 +490,242 @@ if uploaded_vector_store:
     except Exception as e:
         st.error(f"Failed to load vector store: {e}")
 
-st.title("Chat Interface")
-st.info("Enter your query below")
-query = st.text_input("Query Here:")
-if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
-    if query:
-        st.write("Searching...")
-        try:
-            results = st.session_state.compression_retriever.invoke(query)
-            st.markdown("### Retrieved Documents:")
-            for doc in results:
-                drawing = doc.metadata.get("drawing_name", "Unknown")
-                st.write(f"**Drawing:** {drawing}")
-                try:
-                    st.json(json.loads(doc.page_content))
-                except Exception:
-                    st.write(doc.page_content)
-                img_path = doc.metadata.get("drawing_path", "")
-                extraction_dir=DATA_DIR
-                img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
-                if img_path and os.path.exists(img_path):
-                    st.image(Image.open(img_path), width=400)
-                elif img_path2 and os.path.exists(img_path2):
-                    st.image(Image.open(img_path2), width=400)
-                else:
-                    st.write(img_path2)
-        except Exception as e:
-            st.error(f"Search failed: {e}")
+# st.title("Chat Interface")
+# st.info("Enter your query below")
+# query = st.text_input("Query Here:")
+# if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
+#     if query:
+#         st.write("Searching...")
+#         try:
+#             results = st.session_state.compression_retriever.invoke(query)
+#             st.markdown("### Retrieved Documents:")
+#             for doc in results:
+#                 drawing = doc.metadata.get("drawing_name", "Unknown")
+#                 st.write(f"**Drawing:** {drawing}")
+#                 try:
+#                     st.json(json.loads(doc.page_content))
+#                 except Exception:
+#                     st.write(doc.page_content)
+#                 img_path = doc.metadata.get("drawing_path", "")
+#                 extraction_dir=DATA_DIR
+#                 img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
+#                 if img_path and os.path.exists(img_path):
+#                     st.image(Image.open(img_path), width=400)
+#                 elif img_path2 and os.path.exists(img_path2):
+#                     st.image(Image.open(img_path2), width=400)
+#                 else:
+#                     st.write(img_path2)
+#         except Exception as e:
+#             st.error(f"Search failed: {e}")
 
-st.write("Streamlit app finished processing.")
+# st.write("Streamlit app finished processing.")
+
+# ---------------------------------------
+# Chat Interface (LLM-powered Q&A)
+# ---------------------------------------
+# ‹BEGIN NEW CHAT MODULE› ────────────────────────────────────────────────
+import json, textwrap, re
+
+# 1 ─── Few-shot helper: reformulate the user’s question for best recall
+def reformulate_query(original_q: str) -> str:
+    """
+    Uses gemini-2.0-flash to turn the user question into a concise
+    search query that maximizes recall in the vector DB.
+    Falls back to the original question if parsing fails.
+    """
+    # Updated system prompt to guide Gemini on what technical terms to focus on
+    system = textwrap.dedent("""
+        You are a highly skilled civil-engineering assistant specializing in architectural drawings and project specifications.
+        Your task is to answer the user's question using **only** the relevant information from the sources provided.
+        
+        Please follow these steps:
+        
+        1. **Rewrite the user query** to make it concise, clear, and relevant for retrieving documents from the vector DB. Remove unnecessary words (like pronouns and page numbers), and focus on the **important technical terms**.
+        2. Return the **answer in JSON format**, with only the relevant data based on the query. The format should look like the following example, and you should only include the fields that are relevant to the user's question.
+
+        Example of the JSON format:
+        ```json
+        {
+            "Drawing_Type": "Floor_Plan",
+            "Purpose_of_Building": "Residential",
+            "Client_Name": "둔촌주공아파트주택 재건축정비사업조합",
+            "Project_Title": "둔촌주공아파트 주택재건축정비사업",
+            "Drawing_Title": "분상상가-1 지하3층 평면도 (근린생활시설-3)",
+            "Space_Classification": {
+                "Communal": ["hallways", "lounges", "staircases", "elevator lobbies"],
+                "Private": ["bedrooms", "bathrooms"],
+                "Service": ["kitchens", "utility rooms", "storage"]
+            },
+            "Details": {
+                "Drawing_Number": "A51-2002",
+                "Project_Number": "N/A",
+                "Revision_Number": 0,
+                "Scale": "A1 : 1/100, A3 : 1/200",
+                "Architects": ["Unknown"]
+            },
+            "Additional_Details": {
+                "Number_of_Units": 0,
+                "Number_of_Stairs": 2,
+                "Number_of_Elevators": 2,
+                "Number_of_Hallways": 1,
+                "Unit_Details": [],
+                "Stairs_Details": [
+                    {
+                        "Location": "Near entrance",
+                        "Purpose": "Access to upper floors"
+                    }
+                ],
+                "Elevator_Details": [
+                    {
+                        "Location": "Near stairs",
+                        "Purpose": "Vertical transportation"
+                    }
+                ],
+                "Hallways": [
+                    {
+                        "Location": "Connects bathrooms and offices",
+                        "Approx_Area": "N/A"
+                    }
+                ],
+                "Other_Common_Areas": [
+                    {
+                        "Area_Name": "Lobby",
+                        "Approx_Area": "N/A"
+                    },
+                    {
+                        "Area_Name": "Sunken garden",
+                        "Approx_Area": "N/A"
+                    }
+                ]
+            },
+            "Notes_on_Drawing": "Notes/annotations on drawing",
+            "Table_on_Drawing": "Markdown formatted table if applicable, if available; otherwise, return N/A"
+        }
+        ```
+
+        ### Now, use only **relevant fields** and **values** that match the user's question. 
+        ### For example, if the user asks about the "Drawing Number", the response could look like this:
+        ```json
+        {
+            "Drawing_Number": "A51-2002"
+        }
+        ```
+        
+        The format **must** be consistent with the structure above and **only include the relevant data**.
+
+        Here is the original user query:
+        ```
+        User: {original_q}
+        ```
+
+        Rewritten Query: 
+    """)
+
+
+    # Call Gemini to reformulate the query
+    resp = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[system],
+    )
+
+    # Extract the rewritten query from the Gemini response
+    rewritten_query = resp.text.strip()
+
+    # Log the reformulated query for debugging
+    # log_message(f"Reformulated query: {str(rewritten_query)}")
+    if rewritten_query.startswith("```"):
+        rewritten_query = rewritten_query.replace("```", "").strip()
+        if rewritten_query.lower().startswith("json"):
+            rewritten_query = rewritten_query[4:].strip()
+            log_message(f"Orignal query: {original_q}")
+            log_message(f"Rewritten query: {rewritten_query}")
+
+    # Return the rewritten query, fallback to original if not found
+    return rewritten_query if rewritten_query else original_q
+    
+
+# 2 ─── Retrieve docs with the rewritten query
+def retrieve_docs(search_q: str, k: int = 5):
+    return st.session_state.compression_retriever.invoke(search_q)[:k]
+
+
+# 3 ─── Build the final prompt for Gemini answer
+def build_answer_prompt(user_q: str, docs):
+    context_parts, used_tokens = [], 0
+    for i, d in enumerate(docs, 1):
+        # Pretty-print JSON, keep Unicode readable
+        try:
+            pretty = json.dumps(json.loads(d.page_content),
+                                ensure_ascii=False, indent=2)
+        except Exception:
+            pretty = d.page_content
+        snippet = pretty[:2000]  # trim long docs
+        used_tokens += len(snippet)
+        if used_tokens > 12000:      # leave room for instructions
+            break
+        context_parts.append(f"### Source {i}\n{snippet}")
+
+    context_block = "\n\n".join(context_parts)
+    system_msg = textwrap.dedent("""
+        You are a highly skilled civil-engineering assistant specializing in architectural drawings and project specifications. 
+        Your task is to answer the user's question using only the relevant information provided in the sources below. 
+        Please adhere to the following guidelines:
+        
+        • Respond concisely and precisely, based on the information available in the sources.
+        • Always cite the relevant sources by using their reference numbers, e.g., [1], [2].
+        • If the answer is not available in the provided sources, clearly state: 
+        "I couldn't find that information" — do not make assumptions or fabricate details.
+        • Avoid including irrelevant or unnecessary details in your answers. Focus only on what's essential and relevant to the question.
+        • If you need to use specific technical terms, ensure they are accurate and aligned with the project’s terminology (e.g., drawing number, project title, scale).
+
+        Ensure your response is clear, informative, and based strictly on the context from the sources. 
+        If the question is ambiguous or cannot be fully answered with the sources, indicate so transparently.
+    """).strip()
+
+    return f"{system_msg}\n\n{context_block}\n\n### Question\n{user_q}\n\n### Answer"
+
+
+# 4 ─── Two-stage RAG pipeline
+def answer_with_rag(user_q: str):
+    log_message("Searching...")
+    retrieval_q = reformulate_query(user_q)
+    log_message(f"Retrieval query: {retrieval_q}")
+    docs = retrieve_docs(retrieval_q)
+
+    if not docs:
+        return "I couldn’t find any information related to your question.", []
+
+    prompt = build_answer_prompt(user_q, docs)
+    resp = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[prompt]
+    )
+    return resp.text.strip(), docs
+
+
+# 5 ─── Streamlit chat UI
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+st.title("Drawing-AI Chat")
+
+user_query = st.chat_input("Ask about the drawing, specification …")
+
+if user_query:
+    with st.chat_message("user"):
+        st.markdown(user_query)
+
+    answer_text, source_docs = answer_with_rag(user_query)
+
+    with st.chat_message("assistant"):
+        st.markdown(answer_text)
+        with st.expander("🔍 Sources used"):
+            for i, d in enumerate(source_docs, 1):
+                st.markdown(f"**[{i}]** *{d.metadata.get('drawing_name','?')}*")
+                st.code(d.page_content[:1200], language="json")
+
+    st.session_state.chat_history.extend([
+        {"role": "user", "content": user_query},
+        {"role": "assistant", "content": answer_text}
+    ])
+# ‹END NEW CHAT MODULE› ─────────────────────────────────────────────────
