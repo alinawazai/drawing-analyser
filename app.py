@@ -63,6 +63,39 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 
 def log_message(msg):
     st.sidebar.write(msg)
+# --------------------  NEW CODE  --------------------
+def init_retriever():
+    """
+    Build st.session_state.compression_retriever once
+    vector_store and gemini_documents are ready.
+    Safe to call many times – it does nothing if already built.
+    """
+    if (
+        st.session_state.get("vector_store")
+        and st.session_state.get("gemini_documents")
+        and not st.session_state.get("compression_retriever")
+    ):
+        bm25 = BM25Retriever.from_documents(
+            st.session_state.gemini_documents,
+            k=10,
+            preprocess_func=word_tokenize,
+        )
+        sim = st.session_state.vector_store.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 10},
+        )
+        ensemble = EnsembleRetriever(
+            retrievers=[bm25, sim],
+            weights=[0.6, 0.4],
+        )
+        compressor = CohereRerank(
+            model="rerank-multilingual-v3.0",
+            top_n=5,
+        )
+        st.session_state.compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor,
+            base_retriever=ensemble,
+        )
 
 if "processed" not in st.session_state:
     st.session_state.processed = False
