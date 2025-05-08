@@ -1,4 +1,53 @@
-OCR_PROMPT = """
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+class StairsDetail(BaseModel):
+    Location: Optional[str] = ""
+    Purpose: Optional[str] = ""
+
+class ElevatorDetail(BaseModel):
+    Location: Optional[str] = ""
+    Purpose: Optional[str] = ""
+
+class Hallway(BaseModel):
+    Location: Optional[str] = ""
+    Approx_Area: Optional[str] = ""
+
+class Details(BaseModel):
+    Drawing_Number: Optional[str] = ""
+    Project_Number: Optional[str] = ""
+    Revision_Number: Optional[int] = -1
+    Scale: Optional[str] = ""
+    Architects: Optional[List[str]] = Field(default_factory=list)
+
+class SpaceClassification(BaseModel):
+    Communal: Optional[List[str]] = Field(default_factory=list)
+    Private: Optional[List[str]] = Field(default_factory=list)
+    Service: Optional[List[str]] = Field(default_factory=list)
+
+class DrawingMetadata(BaseModel):
+    Drawing_Type: str
+    Purpose_of_Building: str
+    Client_Name: str
+    Project_Title: str
+    Drawing_Title: str
+
+    Spaces: Optional[SpaceClassification] = Field(default_factory=SpaceClassification)
+    Details: Optional[Details] = Field(default_factory=Details)
+    Notes_on_Drawing: Optional[str] = ""
+    Table_on_Drawing: Optional[str] = ""
+
+    Number_of_Stairs: Optional[int] = -1
+    Number_of_Elevators: Optional[int] = -1
+    Number_of_Hallways: Optional[int] = -1
+
+    Unit_Details: Optional[List[str]] = Field(default_factory=list)
+    Stairs_Details: Optional[List[StairsDetail]] = Field(default_factory=list)
+    Elevator_Details: Optional[List[ElevatorDetail]] = Field(default_factory=list)
+    Hallways: Optional[List[Hallway]] = Field(default_factory=list)
+
+
+CR_PROMPT = """
                 You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
                 Within the images you receive, there will be details pertaining to a single construction drawing.
                 Your job is to identify and extract exactly below fields from this text:

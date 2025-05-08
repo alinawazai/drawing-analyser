@@ -23,6 +23,8 @@ from dotenv import load_dotenv
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
+from typing import List, Optional
+from pydantic import BaseModel, Field
 from ultralytics import YOLO
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
@@ -36,6 +38,7 @@ from langchain_cohere import CohereRerank
 from nltk.tokenize import word_tokenize
 import torch
 import nltk
+from prompts import DrawingMetadata
 
 # Download required NLTK resource if needed.
 try:
@@ -70,53 +73,7 @@ if "processed" not in st.session_state:
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
     st.session_state.previous_pdf_uploaded = None  # Track the last uploaded PDF
-from typing import List, Optional
-from pydantic import BaseModel, Field
 
-class StairsDetail(BaseModel):
-    Location: Optional[str] = ""
-    Purpose: Optional[str] = ""
-
-class ElevatorDetail(BaseModel):
-    Location: Optional[str] = ""
-    Purpose: Optional[str] = ""
-
-class Hallway(BaseModel):
-    Location: Optional[str] = ""
-    Approx_Area: Optional[str] = ""
-
-class Details(BaseModel):
-    Drawing_Number: Optional[str] = ""
-    Project_Number: Optional[str] = ""
-    Revision_Number: Optional[int] = -1
-    Scale: Optional[str] = ""
-    Architects: Optional[List[str]] = Field(default_factory=list)
-
-class SpaceClassification(BaseModel):
-    Communal: Optional[List[str]] = Field(default_factory=list)
-    Private: Optional[List[str]] = Field(default_factory=list)
-    Service: Optional[List[str]] = Field(default_factory=list)
-
-class DrawingMetadata(BaseModel):
-    Drawing_Type: str
-    Purpose_of_Building: str
-    Client_Name: str
-    Project_Title: str
-    Drawing_Title: str
-
-    Spaces: Optional[SpaceClassification] = Field(default_factory=SpaceClassification)
-    Details: Optional[Details] = Field(default_factory=Details)
-    Notes_on_Drawing: Optional[str] = ""
-    Table_on_Drawing: Optional[str] = ""
-
-    Number_of_Stairs: Optional[int] = -1
-    Number_of_Elevators: Optional[int] = -1
-    Number_of_Hallways: Optional[int] = -1
-
-    Unit_Details: Optional[List[str]] = Field(default_factory=list)
-    Stairs_Details: Optional[List[StairsDetail]] = Field(default_factory=list)
-    Elevator_Details: Optional[List[ElevatorDetail]] = Field(default_factory=list)
-    Hallways: Optional[List[Hallway]] = Field(default_factory=list)
 
 # -------------------------
 # Pipeline Functions (Sequential Version)
