@@ -32,8 +32,8 @@ class DrawingMetadata(BaseModel):
     Project_Title: str
     Drawing_Title: str
 
-    Spaces: Optional[SpaceClassification] = Field(default_factory=SpaceClassification)
-    Details: Optional[Details] = Field(default_factory=Details)
+    Spaces: Optional[SpaceClassification] = None
+    Details: Optional[Details] = None
     Notes_on_Drawing: Optional[str] = ""
     Table_on_Drawing: Optional[str] = ""
 
