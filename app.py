@@ -374,7 +374,11 @@ async def run_pipeline(pdf_path, ocr_prompt):
 
     log_message("Extracting metadata using Gemini OCR...")
     gemini_documents = await process_all_pages(cropped_data, ocr_prompt)
-
+    combined_path = os.path.join(DATA_DIR, "gemini_combined.json")
+    with open(combined_path, "w", encoding="utf-8") as jf:
+        json.dump([json.loads(d.page_content) for d in gemini_documents],
+                  jf, ensure_ascii=False, indent=4)
+    log_message(f"Combined Gemini JSON saved → {combined_path}")
     log_message("Building vector store for semantic search...")
     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
     example_embedding = embeddings.embed_query("sample text")
@@ -389,24 +393,22 @@ async def run_pipeline(pdf_path, ocr_prompt):
     uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
     vector_store.add_documents(documents=gemini_documents, ids=uuids)
 
-    return gemini_documents, vector_store
+    return gemini_documents, vector_store, combined_path
 
 # -------------------------
-# UI Layout
+# UI Layout (Streamlit)
 # -------------------------
 st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
     if uploaded_pdf.name != st.session_state.previous_pdf_uploaded:
-        # Reset the session state for a new PDF upload
         st.session_state.processed = False
         st.session_state.gemini_documents = None
         st.session_state.vector_store = None
-        st.session_state.compression_retriever = None
-        st.session_state.previous_pdf_uploaded = uploaded_pdf.name  # Store the name of the newly uploaded PDF
+        st.session_state.previous_pdf_uploaded = uploaded_pdf.name
 
-    os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
+    os.makedirs(DATA_DIR, exist_ok=True)  
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
@@ -414,19 +416,26 @@ if uploaded_pdf:
 
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
-        log_message("PDF uploaded successfully. Starting the pipeline...")
-
-        # Run the processing pipeline asynchronously
+        log_message("Starting pipeline...")
         ocr_prompt = COMBINED_PROMPT
-        gemini_documents, vector_store = asyncio.run(run_pipeline(pdf_path))
+        gemini_documents, vector_store, json_path = asyncio.run(run_pipeline(pdf_path, ocr_prompt))
 
-        # Update session state with processed data
+        # Update session state
         st.session_state.gemini_documents = gemini_documents
         st.session_state.vector_store = vector_store
+        st.session_state.json_path       = json_path
         st.session_state.processed = True
-        log_message("Processing pipeline completed.")
+        log_message("Processing completed.")
         
-    
+
+if st.session_state.get("json_path"):
+    with open(st.session_state.json_path, "rb") as jf:
+        st.download_button(
+            label="📥 Download combined Gemini JSON",
+            data=jf.read(),
+            file_name="gemini_combined.json",
+            mime="application/json"
+        )    
 # Vector Store Download Button
 if uploaded_pdf and st.session_state.processed:
     # Add the "Download Vector Store" button
