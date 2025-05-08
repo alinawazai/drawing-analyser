@@ -194,10 +194,7 @@ def process_with_gemini(image_paths, prompt):
             log_message(f"Error opening {path}: {e}")
 
     # time.sleep(4)  # Simple rate-limiting
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents,config = {
-        'response_mime_type': 'application/json',
-        'response_schema': DrawingMetadata
-    })
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
     if resp_text.startswith("```"):
@@ -220,6 +217,7 @@ def process_page_with_metadata(page_key, blocks, prompt):
         log_message(f"No cropped images for {page_key}")
         return None
     raw_metadata = process_with_gemini(all_imgs, prompt)
+    raw_metadata = DrawingMetadata.model_validate(raw_metadata)
     if raw_metadata:
         doc = Document(
             page_content=json.dumps(raw_metadata),
