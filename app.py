@@ -57,13 +57,13 @@ HIGH_RES_DIR = os.path.join(DATA_DIR, "500_dpi")   # For cropping
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 from google import genai
 client = genai.Client(api_key=GEMINI_API_KEY)
+
 # Set up basic logging (optional)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 def log_message(msg):
     st.sidebar.write(msg)
 
-# Initialize session state (only processed flag and cached results)
 if "processed" not in st.session_state:
     st.session_state.processed = False
     st.session_state.gemini_documents = None
@@ -72,10 +72,71 @@ if "processed" not in st.session_state:
     st.session_state.previous_pdf_uploaded = None  # Track the last uploaded PDF
 
 # -------------------------
-# Pipeline Functions (Sequential Version)
+# Pipeline Functions (Asynchronous Version)
 # -------------------------
 
-def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
+
+def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
+    """
+    Helper to scale the bounding box from low-res to high-res coordinates.
+    """
+    scale_x = dst_size[0] / src_size[0]
+    scale_y = scale_x
+    return bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y
+
+# Asynchronous function for crop_and_save
+async def crop_and_save(detection_output, output_dir):
+    log_message("Cropping detected regions using high-res images asynchronously...")
+    output_data = {}
+
+    async def crop_image(image_name, detections, image_path, image_resource_path):
+        try:
+            # Use asyncio.to_thread to offload blocking I/O (image processing) to a separate thread
+            await asyncio.to_thread(crop_single_image, image_name, detections, image_path, output_data, image_resource_path)
+        except Exception as e:
+            log_message(f"Error cropping {image_name}: {e}")
+
+    tasks = []
+    for image_name, detections in detection_output.items():
+        image_resource_path = os.path.join(output_dir, image_name.replace(".jpg", ""))
+        image_path = os.path.join(HIGH_RES_DIR, image_name)
+        if not os.path.exists(image_resource_path):
+            os.makedirs(image_resource_path)
+        if not os.path.exists(image_path):
+            log_message(f"High-res image missing: {image_path}")
+            continue
+
+        # Ensure that image_resource_path is passed as an argument
+        tasks.append(crop_image(image_name, detections, image_path, image_resource_path))
+
+    await asyncio.gather(*tasks)
+    log_message("Cropping completed asynchronously.")
+    return output_data
+
+# Helper function to crop a single image (to be used in the thread)
+def crop_single_image(image_name, detections, image_path, output_data, image_resource_path):
+    try:
+        with Image.open(image_path) as image:
+            image_data = {}
+            for det in detections:
+                label = det["label"]
+                bbox = det["bbox"]
+                label_dir = os.path.join(image_resource_path, str(label))  # Save in this path
+                os.makedirs(label_dir, exist_ok=True)
+                x, y, w, h = scale_bboxes(bbox)
+                cropped_img = image.crop((x - w / 2, y - h / 2, x + w / 2, y + h / 2))
+                cropped_name = f"{label}_{len(os.listdir(label_dir)) + 1}.jpg"
+                cropped_path = os.path.join(label_dir, cropped_name)
+                cropped_img.save(cropped_path)
+                image_data.setdefault(label, []).append(cropped_path)
+            image_data["Image_Path"] = image_path
+            output_data[image_name] = image_data
+            log_message(f"Cropped images saved for {image_name}")
+    except Exception as e:
+        log_message(f"Error cropping {image_name}: {e}")
+
+        
+async def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
@@ -92,9 +153,6 @@ def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
         raise
 
     file_paths = []
-    # Optional: Limit number of pages (e.g., process only first 10 pages) 
-    # max_pages = min(len(doc), 10)
-    # for i in range(max_pages):
     for i in range(len(doc)):
         page = doc[i]
         scale = fixed_length / page.rect.width
@@ -115,7 +173,7 @@ class BlockDetectionModel:
         self.model = YOLO(weight).to(self.device)
         log_message(f"YOLO model loaded on {self.device}.")
 
-    def predict_batch(self, images_dir):
+    async def predict_batch(self, images_dir):
         if not os.path.exists(images_dir) or not os.listdir(images_dir):
             raise ValueError(f"Directory {images_dir} is empty or does not exist.")
         images = glob.glob(os.path.join(images_dir, "*.jpg"))
@@ -139,45 +197,7 @@ class BlockDetectionModel:
         return output
 
 
-def scale_bboxes(bbox, src_size=(662, 468), dst_size=(4000, 3000)):
-    scale_x = dst_size[0] / src_size[0]
-    scale_y = scale_x
-    return bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y
-
-def crop_and_save(detection_output, output_dir):
-    log_message("Cropping detected regions using high-res images...")
-    output_data = {}
-    for image_name, detections in detection_output.items():
-        image_resource_path = os.path.join(output_dir, image_name.replace(".jpg", ""))
-        image_path = os.path.join(HIGH_RES_DIR, image_name)
-        if not os.path.exists(image_resource_path):
-            os.makedirs(image_resource_path)
-        if not os.path.exists(image_path):
-            log_message(f"High-res image missing: {image_path}")
-            continue
-        try:
-            with Image.open(image_path) as image:
-                image_data = {}
-                for det in detections:
-                    label = det["label"]
-                    bbox = det["bbox"]
-                    label_dir = os.path.join(image_resource_path, str(label))
-                    os.makedirs(label_dir, exist_ok=True)
-                    x, y, w, h = scale_bboxes(bbox)
-                    cropped_img = image.crop((x - w / 2, y - h / 2, x + w / 2, y + h / 2))
-                    cropped_name = f"{label}_{len(os.listdir(label_dir)) + 1}.jpg"
-                    cropped_path = os.path.join(label_dir, cropped_name)
-                    cropped_img.save(cropped_path)
-                    image_data.setdefault(label, []).append(cropped_path)
-                image_data["Image_Path"] = image_path
-                output_data[image_name] = image_data
-                log_message(f"Cropped images saved for {image_name}")
-        except Exception as e:
-            log_message(f"Error cropping {image_name}: {e}")
-    log_message("Cropping completed.")
-    return output_data
-
-def process_with_gemini(image_paths, prompt):
+async def process_with_gemini(image_paths, prompt):
     log_message(f"Asynchronously processing {len(image_paths)} images with Gemini OCR in bulk...")
     # Even though this step is originally asynchronous, processing sequentially reduces load.
     contents = [prompt]
@@ -189,8 +209,7 @@ def process_with_gemini(image_paths, prompt):
         except Exception as e:
             log_message(f"Error opening {path}: {e}")
 
-    # time.sleep(4)  # Simple rate-limiting
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
+    response = await asyncio.to_thread(client.models.generate_content, model="gemini-2.0-flash", contents=contents)
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
     if resp_text.startswith("```"):
@@ -203,17 +222,18 @@ def process_with_gemini(image_paths, prompt):
         log_message(f"Failed to parse JSON: {resp_text}")
         return None
 
-def process_page_with_metadata(page_key, blocks, prompt):
+async def process_page_with_metadata(page_key, blocks, prompt):
     log_message(f"Processing page: {page_key}")
     all_imgs = []
     for block_type, paths in blocks.items():
         if block_type != "Image_Path":
             all_imgs.extend(paths)
         if block_type == "Image_Path":
+            all_imgs.append(paths)
     if not all_imgs:
         log_message(f"No cropped images for {page_key}")
         return None
-    raw_metadata = process_with_gemini(all_imgs, prompt)
+    raw_metadata = await process_with_gemini(all_imgs, prompt)
     if raw_metadata:
         doc = Document(
             page_content=json.dumps(raw_metadata),
@@ -225,17 +245,16 @@ def process_page_with_metadata(page_key, blocks, prompt):
         log_message(f"No metadata extracted for {page_key}")
         return None
 
-def process_all_pages(data, prompt):
+async def process_all_pages(data, prompt):
     documents = []
     for key, blocks in data.items():
-        doc = process_page_with_metadata(key, blocks, prompt)
+        doc = await process_page_with_metadata(key, blocks, prompt)
         if doc:
             documents.append(doc)
         else:
             log_message(f"No document returned for {key}")
-    log_message(f"Total {len(documents)} documents processed sequentially.")
+    log_message(f"Total {len(documents)} documents processed asynchronously.")
     return documents
-
 def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_images_dir=HIGH_RES_DIR):
     # Create a temporary directory to store the files
     temp_dir = os.path.join(DATA_DIR, "temp_files")
@@ -340,18 +359,44 @@ def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
     shutil.rmtree(temp_dir)  # Remove the temporary directory
 
     return faiss_index, docstore, documents
+
+async def run_pipeline(pdf_path, ocr_prompt):
+    log_message("Converting PDF to images...")
+    low_res_paths = await pdf_to_images(pdf_path, LOW_RES_DIR, 662)
+    high_res_paths = await pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
+
+    log_message("Running YOLO detection on low-res images...")
+    yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
+    detection_results = await yolo_model.predict_batch(LOW_RES_DIR)
+
+    log_message("Cropping detected regions using high-res images...")
+    cropped_data = await crop_and_save(detection_results, OUTPUT_DIR)
+
+    log_message("Extracting metadata using Gemini OCR...")
+    gemini_documents = await process_all_pages(cropped_data, ocr_prompt)
+
+    log_message("Building vector store for semantic search...")
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    example_embedding = embeddings.embed_query("sample text")
+    d = len(example_embedding)
+    index = faiss.IndexFlatL2(d)
+    vector_store = FAISS(
+        embedding_function=embeddings,
+        index=index,
+        docstore=InMemoryDocstore(),
+        index_to_docstore_id={}
+    )
+    uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
+    vector_store.add_documents(documents=gemini_documents, ids=uuids)
+
+    return gemini_documents, vector_store
+
 # -------------------------
-# UI Layout
+# UI Layout (Streamlit)
 # -------------------------
 st.sidebar.title("PDF Processing")
-# It is recommended to add a file named `.streamlit/config.toml` in your project root with:
-# [server]
-# fileWatcherType = "none"
-
-# Track if a new PDF is uploaded
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
-# Reset the session state when a new PDF is uploaded
 if uploaded_pdf:
     if uploaded_pdf.name != st.session_state.previous_pdf_uploaded:
         # Reset the session state for a new PDF upload
@@ -369,65 +414,20 @@ if uploaded_pdf:
 
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
-        log_message("PDF uploaded successfully.")
+        log_message("PDF uploaded successfully. Starting the pipeline...")
 
-        log_message("Converting PDF to images sequentially...")
-        low_res_paths = pdf_to_images(pdf_path, LOW_RES_DIR, 662)
-        high_res_paths = pdf_to_images(pdf_path, HIGH_RES_DIR, 4000)
-        log_message("PDF conversion completed.")
-        # uploaded_pdf = None
-        log_message("Running YOLO detection on low-res images...")
-        yolo_model = BlockDetectionModel("best_small_yolo11_block_etraction.pt")
-        detection_results = yolo_model.predict_batch(LOW_RES_DIR)
-        log_message("Block detection completed.")
-
-        log_message("Cropping detected regions using high-res images...")
-        cropped_data = crop_and_save(detection_results, OUTPUT_DIR)
-        log_message("Cropping completed.")
-
+        # Run the processing pipeline asynchronously
         ocr_prompt = COMBINED_PROMPT
-        log_message("Extracting metadata using Gemini OCR sequentially...")
-        gemini_documents = process_all_pages(cropped_data, ocr_prompt)
-        log_message("Metadata extraction completed.")
-        gemini_json_path = os.path.join(DATA_DIR, "gemini_documents.json")
-        with open(gemini_json_path, "w") as f:
-            json.dump([doc.dict() for doc in gemini_documents], f, indent=4)
-        log_message("Gemini documents saved.")
+        gemini_documents, vector_store = asyncio.run(run_pipeline(pdf_path))
 
-        log_message("Building vector store for semantic search...")
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        example_embedding = embeddings.embed_query("sample text")
-        d = len(example_embedding)
-        index = faiss.IndexFlatL2(d)
-        vector_store = FAISS(
-            embedding_function=embeddings,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={}
-        )
-        uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
-        vector_store.add_documents(documents=gemini_documents, ids=uuids)
-        log_message("Vector store built and documents indexed.")
-
-        log_message("Setting up retrievers...")
-        bm25_retriever = BM25Retriever.from_documents(gemini_documents, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k":10})
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, retriever_ss],
-            weights=[0.6, 0.4]
-        )
-        log_message("Setting up RAG pipeline...")
-        compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
-        log_message("RAG pipeline set up.")
-        st.session_state.processed = True
+        # Update session state with processed data
         st.session_state.gemini_documents = gemini_documents
         st.session_state.vector_store = vector_store
-        st.session_state.compression_retriever = compression_retriever
+        st.session_state.processed = True
         log_message("Processing pipeline completed.")
-
+        
+    
+# Vector Store Download Button
 if uploaded_pdf and st.session_state.processed:
     # Add the "Download Vector Store" button
     vector_store_filename = st.text_input("Enter the name for the vector store file:", "vector_store.zip")
@@ -451,70 +451,58 @@ if uploaded_pdf and st.session_state.processed:
             mime="application/zip"
         )
 
-# Add the "Upload Vector Store" button
+# Vector Store Upload Button
 uploaded_vector_store = st.file_uploader("Upload a vector store", type=[".zip"])
 
-if uploaded_vector_store:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    try:
-        # Load the vector store from the uploaded files, including high-res images
-        faiss_index, inmdocs, docs = load_vector_store_from_zip(uploaded_vector_store)
-
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        example_embedding = embeddings.embed_query("sample text")
-        d = len(example_embedding)
-        index = faiss.IndexFlatL2(d)
-        vector_store = FAISS(
-            embedding_function=embeddings,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={}
-        )
-        uuids = [str(uuid4()) for _ in range(len(docs))]
-        vector_store.add_documents(documents=docs, ids=uuids)
-        st.session_state.vector_store = vector_store
-        bm25_retriever = BM25Retriever.from_documents(docs, k=10, preprocess_func=word_tokenize)
-        retriever_ss = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
+# Ensure that compression_retriever is initialized correctly when the vector store is processed
+if uploaded_pdf and st.session_state.processed:
+    # Initialize the retriever only after the documents and vector store have been processed
+    if st.session_state.vector_store and not st.session_state.compression_retriever:
+        bm25_retriever = BM25Retriever.from_documents(st.session_state.gemini_documents, k=10, preprocess_func=word_tokenize)
+        retriever_ss = st.session_state.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 10})
         ensemble_retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, retriever_ss],
             weights=[0.6, 0.4]
         )
         compressor = CohereRerank(model="rerank-multilingual-v3.0", top_n=5)
-        compression_retriever = ContextualCompressionRetriever(
+        st.session_state.compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, base_retriever=ensemble_retriever
         )
-        st.session_state.compression_retriever = compression_retriever
+        log_message("Compression retriever initialized.")
 
-        st.success(f"Vector store loaded successfully from {uploaded_vector_store.name}.")
-    except Exception as e:
-        st.error(f"Failed to load vector store: {e}")
-
-st.title("Chat Interface")
+# Query Interface (after retriever is initialized)
+st.title("Query Interface")
 st.info("Enter your query below")
+
 query = st.text_input("Query Here:")
+
 if (uploaded_pdf and st.session_state.processed) or uploaded_vector_store:
     if query:
-        st.write("Searching...")
-        try:
-            results = st.session_state.compression_retriever.invoke(query)
-            st.markdown("### Retrieved Documents:")
-            for doc in results:
-                drawing = doc.metadata.get("drawing_name", "Unknown")
-                st.write(f"**Drawing:** {drawing}")
-                try:
-                    st.json(json.loads(doc.page_content))
-                except Exception:
-                    st.write(doc.page_content)
-                img_path = doc.metadata.get("drawing_path", "")
-                extraction_dir=DATA_DIR
-                img_path2 = os.path.join(st.image_dir_for_vector_db , img_path.split("/")[-1])
-                if img_path and os.path.exists(img_path):
-                    st.image(Image.open(img_path), width=400)
-                elif img_path2 and os.path.exists(img_path2):
-                    st.image(Image.open(img_path2), width=400)
-                else:
-                    st.write(img_path2)
-        except Exception as e:
-            st.error(f"Search failed: {e}")
+        # Ensure the retriever is set before performing the search
+        if st.session_state.compression_retriever:
+            st.write("Searching...")
+            try:
+                results = st.session_state.compression_retriever.invoke(query)
+                st.markdown("### Retrieved Documents:")
+                for doc in results:
+                    drawing = doc.metadata.get("drawing_name", "Unknown")
+                    st.write(f"**Drawing:** {drawing}")
+                    try:
+                        st.json(json.loads(doc.page_content))
+                    except Exception:
+                        st.write(doc.page_content)
+                    img_path = doc.metadata.get("drawing_path", "")
+                    extraction_dir = DATA_DIR
+                    img_path2 = os.path.join(st.image_dir_for_vector_db, img_path.split("/")[-1])
+                    if img_path and os.path.exists(img_path):
+                        st.image(Image.open(img_path), width=400)
+                    elif img_path2 and os.path.exists(img_path2):
+                        st.image(Image.open(img_path2), width=400)
+                    else:
+                        st.write(img_path2)
+            except Exception as e:
+                st.error(f"Search failed: {e}")
+        else:
+            st.error("Retriever is not initialized. Please ensure the PDF has been processed.")
 
 st.write("Streamlit app finished processing.")

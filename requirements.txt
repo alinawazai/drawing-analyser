@@ -12,3 +12,4 @@ google-genai
 nest_asyncio
 python-dotenv
 PyMuPDF
+google-generativeai
