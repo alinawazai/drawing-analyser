@@ -392,7 +392,7 @@ async def run_pipeline(pdf_path, ocr_prompt):
     return gemini_documents, vector_store
 
 # -------------------------
-# UI Layout (Streamlit)
+# UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
