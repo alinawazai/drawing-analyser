@@ -102,21 +102,7 @@ Return a single JSON object with the following fields:
                 "Hallways": [
                     {
                         "Location": "Connects bathrooms and offices",
-                        "Approx_Area": "N/A"
-                    }
-                ],
-                "Other_Common_Areas": [
-                    {
-                        "Area_Name": "Lobby",
-                        "Approx_Area": "N/A"
-                    },
-                    {
-                        "Area_Name": "Sunken garden",
-                        "Approx_Area": "N/A"
-                    },
-                    {
-                        "Area_Name": "Mechanical room",
-                        "Approx_Area": "N/A"
+                        "Purpose": "N/A"
                     }
                 ]
             }

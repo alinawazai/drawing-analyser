@@ -70,6 +70,53 @@ if "processed" not in st.session_state:
     st.session_state.vector_store = None
     st.session_state.compression_retriever = None
     st.session_state.previous_pdf_uploaded = None  # Track the last uploaded PDF
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+class StairsDetail(BaseModel):
+    Location: Optional[str] = ""
+    Purpose: Optional[str] = ""
+
+class ElevatorDetail(BaseModel):
+    Location: Optional[str] = ""
+    Purpose: Optional[str] = ""
+
+class Hallway(BaseModel):
+    Location: Optional[str] = ""
+    Approx_Area: Optional[str] = ""
+
+class Details(BaseModel):
+    Drawing_Number: Optional[str] = ""
+    Project_Number: Optional[str] = ""
+    Revision_Number: Optional[int] = -1
+    Scale: Optional[str] = ""
+    Architects: Optional[List[str]] = Field(default_factory=list)
+
+class SpaceClassification(BaseModel):
+    Communal: Optional[List[str]] = Field(default_factory=list)
+    Private: Optional[List[str]] = Field(default_factory=list)
+    Service: Optional[List[str]] = Field(default_factory=list)
+
+class DrawingMetadata(BaseModel):
+    Drawing_Type: str
+    Purpose_of_Building: str
+    Client_Name: str
+    Project_Title: str
+    Drawing_Title: str
+
+    Spaces: Optional[SpaceClassification] = Field(default_factory=SpaceClassification)
+    Details: Optional[Details] = Field(default_factory=Details)
+    Notes_on_Drawing: Optional[str] = ""
+    Table_on_Drawing: Optional[str] = ""
+
+    Number_of_Stairs: Optional[int] = -1
+    Number_of_Elevators: Optional[int] = -1
+    Number_of_Hallways: Optional[int] = -1
+
+    Unit_Details: Optional[List[str]] = Field(default_factory=list)
+    Stairs_Details: Optional[List[StairsDetail]] = Field(default_factory=list)
+    Elevator_Details: Optional[List[ElevatorDetail]] = Field(default_factory=list)
+    Hallways: Optional[List[Hallway]] = Field(default_factory=list)
 
 # -------------------------
 # Pipeline Functions (Sequential Version)
@@ -190,7 +237,10 @@ def process_with_gemini(image_paths, prompt):
             log_message(f"Error opening {path}: {e}")
 
     # time.sleep(4)  # Simple rate-limiting
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=contents,config = {
+        'response_mime_type': 'application/json',
+        'response_schema': DrawingMetadata
+    })
     log_message("Gemini OCR bulk response received.")
     resp_text = response.text.strip()
     if resp_text.startswith("```"):
@@ -383,46 +433,79 @@ if uploaded_pdf and not st.session_state.processed:
         log_message("Cropping completed.")
 
         ocr_prompt = """
-            You are an advanced system specialized in extracting standardized metadata from construction drawing texts.
-            Within the images you receive, there will be details pertaining to a single construction drawing.
-            Your job is to identify and extract exactly below fields from this text:
-            - 1st image has details about the drawing_title and scale
-            - 2nd Image has details about the client or project
-            - 4th Images has Notes
-            - 3rd Images has rest of the informations
-            - last image is the full image from which the above image are cropped
-            1. Purpose_Type_of_Drawing (examples: 'Architectural', 'Structural', 'Fire Protection')
-            2. Client_Name
-            3. Project_Title
-            4. Drawing_Title
-            5. Floor
-            6. Drawing_Number
-            7. Project_Number
-            8. Revision_Number (must be a numeric value, or 'N/A' if it cannot be determined)
-            9. Scale
-            10. Architects (list of names; use ['Unknown'] if no names are identified)
-            11. Notes_on_Drawing (any remarks or additional details related to the drawing)
-            
-            Key Requirements:
-            - If any field is missing, return an empty string ('') or 'N/A' for that field.
-            - Return only a valid JSON object containing these nine fields in the order listed, with no extra text.
-            - Preserve all text in its original language (no translation), apart from minimal cleaning if necessary.
-            - Do not wrap the final JSON in code fences.
-            - Return ONLY the final JSON object with these fields and no additional commentary.
-            Below is an example json format:
-            {{
-                "Purpose_Type_of_Drawing": "Architectural",
-                "Client_Name": "문촌주공아파트주택  재건축정비사업조합",
-                "Project_Title": "문촌주공아파트  주택재건축정비사업",
-                "Drawing_Title": "분산 상가-7  단면도-3  (근린생활시설-3)",
-                "Floor": "주단면도-3",
-                "Drawing_Number": "A51-2023",
-                "Project_Number": "EP-201",
+            You are an advanced system specialized in extracting structured metadata from construction drawing images. Each input consists of a sequence of cropped images taken from a single architectural drawing.
+
+            Each image contains different types of information:
+            - The 1st image contains the **Drawing_Title** and **Scale**.
+            - The 2nd image includes the **Client_Name** or **Project_Title**.
+            - The 3rd image contains general details such as **Drawing_Number**, **Project_Number**, **Revision_Number**, and **Architects**.
+            - The 4th image contains **Notes_on_Drawing** or annotations.
+            - The last image is the full original drawing, which may help in confirming overall metadata context.
+
+            Extract and return exactly the following fields, with this structure:
+
+            1. Drawing_Type (e.g., "Architectural", "Structural", "Fire Protection")
+            2. Purpose_of_Building (e.g., "Residential", "Commercial")
+            3. Client_Name
+            4. Project_Title
+            5. Drawing_Title
+            6. Spaces → Communal, Private, Service (each as a list of strings)
+            7. Details → Drawing_Number, Project_Number, Revision_Number (integer), Scale, Architects (list of names)
+            8. Notes_on_Drawing
+            9. Table_on_Drawing
+            10. Number_of_Stairs (integer)
+            11. Number_of_Elevators (integer)
+            12. Number_of_Hallways (integer)
+            13. Unit_Details (list of strings)
+            14. Stairs_Details → list of objects with Location and Purpose
+            15. Elevator_Details → list of objects with Location and Purpose
+            16. Hallways → list of objects with Location and Approx_Area
+
+            If any value is not available in the image, use:
+            - An empty string `""` for text fields
+            - `-1` for numeric fields
+            - Empty lists `[]` for lists
+
+            Return ONLY a valid JSON object with this exact structure. No extra text, markdown, or commentary.
+
+            Example output:
+
+            {
+            "Drawing_Type": "Floor_Plan",
+            "Purpose_of_Building": "Residential",
+            "Client_Name": "둔촌주공아파트주택 재건축정비사업조합",
+            "Project_Title": "둔촌주공아파트 주택재건축정비사업",
+            "Drawing_Title": "분산상가-1 지하3층 평면도 (근린생활시설-3)",
+            "Spaces": {
+                "Communal": ["hallways", "lounges", "staircases", "elevator lobbies"],
+                "Private": ["bedrooms", "bathrooms"],
+                "Service": ["kitchens", "utility rooms", "storage"]
+            },
+            "Details": {
+                "Drawing_Number": "A51-2002",
+                "Project_Number": "N/A",
                 "Revision_Number": 0,
                 "Scale": "A1 : 1/100, A3 : 1/200",
-                "Architects": ["Unknown"],
-                "Notes_on_Drawing": "Example notes here."
-            }}
+                "Architects": ["Unknown"]
+            },
+            "Notes_on_Drawing": "Example notes here.",
+            "Table_on_Drawing": "Markdown formatted table if applicable if available else return N/A",
+            "Number_of_Stairs": 2,
+            "Number_of_Elevators": 2,
+            "Number_of_Hallways": 1,
+            "Unit_Details": [],
+            "Stairs_Details": [
+                {"Location": "Near entrance", "Purpose": "Access to upper floors"},
+                {"Location": "Near entrance", "Purpose": "Access to upper floors"}
+            ],
+            "Elevator_Details": [
+                {"Location": "Near stairs", "Purpose": "Vertical transportation"},
+                {"Location": "Near stairs", "Purpose": "Vertical transportation"}
+            ],
+            "Hallways": [
+                {"Location": "Connects bathrooms and offices", "Approx_Area": "N/A"}
+            ]
+            }
             """
         log_message("Extracting metadata using Gemini OCR sequentially...")
         gemini_documents = process_all_pages(cropped_data, ocr_prompt)
