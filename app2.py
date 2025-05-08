@@ -217,7 +217,7 @@ def process_page_with_metadata(page_key, blocks, prompt):
         log_message(f"No cropped images for {page_key}")
         return None
     raw_metadata = process_with_gemini(all_imgs, prompt)
-    raw_metadata = DrawingMetadata.model_validate(raw_metadata)
+    # raw_metadata = DrawingMetadata.model_validate(raw_metadata)
     if raw_metadata:
         doc = Document(
             page_content=json.dumps(raw_metadata),
