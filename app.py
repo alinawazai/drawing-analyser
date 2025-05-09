@@ -413,19 +413,26 @@ if uploaded_pdf:
         f.write(uploaded_pdf.getbuffer())
     st.sidebar.success("PDF uploaded successfully.")
 
+async def process_pipeline(pdf_path, ocr_prompt):
+    gemini_documents, vector_store = await run_pipeline(pdf_path, ocr_prompt)
+    
+    # Update session state with processed data
+    st.session_state.gemini_documents = gemini_documents
+    st.session_state.vector_store = vector_store
+    st.session_state.processed = True
+    log_message("Processing pipeline completed.")
+
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
         log_message("PDF uploaded successfully. Starting the pipeline...")
 
         # Run the processing pipeline asynchronously
         ocr_prompt = COMBINED_PROMPT
-        gemini_documents, vector_store = await run_pipeline(pdf_path, ocr_prompt)
+        
+        # Use asyncio to run the async function
+        asyncio.run(process_pipeline(pdf_path, ocr_prompt))  # Run the async function
 
-        # Update session state with processed data
-        st.session_state.gemini_documents = gemini_documents
-        st.session_state.vector_store = vector_store
-        st.session_state.processed = True
-        log_message("Processing pipeline completed.")
+        log_message("Processing completed.")
 
 
 # Vector Store Download Button
