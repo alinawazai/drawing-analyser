@@ -419,7 +419,7 @@ if uploaded_pdf and not st.session_state.processed:
 
         # Run the processing pipeline asynchronously
         ocr_prompt = COMBINED_PROMPT
-        gemini_documents, vector_store = asyncio.run(run_pipeline(pdf_path))
+        gemini_documents, vector_store = await run_pipeline(pdf_path, ocr_prompt)
 
         # Update session state with processed data
         st.session_state.gemini_documents = gemini_documents
