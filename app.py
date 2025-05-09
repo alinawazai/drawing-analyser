@@ -63,39 +63,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 
 def log_message(msg):
     st.sidebar.write(msg)
-# --------------------  NEW CODE  --------------------
-def init_retriever():
-    """
-    Build st.session_state.compression_retriever once
-    vector_store and gemini_documents are ready.
-    Safe to call many times – it does nothing if already built.
-    """
-    if (
-        st.session_state.get("vector_store")
-        and st.session_state.get("gemini_documents")
-        and not st.session_state.get("compression_retriever")
-    ):
-        bm25 = BM25Retriever.from_documents(
-            st.session_state.gemini_documents,
-            k=10,
-            preprocess_func=word_tokenize,
-        )
-        sim = st.session_state.vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 10},
-        )
-        ensemble = EnsembleRetriever(
-            retrievers=[bm25, sim],
-            weights=[0.6, 0.4],
-        )
-        compressor = CohereRerank(
-            model="rerank-multilingual-v3.0",
-            top_n=5,
-        )
-        st.session_state.compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor,
-            base_retriever=ensemble,
-        )
 
 if "processed" not in st.session_state:
     st.session_state.processed = False
@@ -168,7 +135,7 @@ def crop_single_image(image_name, detections, image_path, output_data, image_res
     except Exception as e:
         log_message(f"Error cropping {image_name}: {e}")
 
-        
+
 async def pdf_to_images(pdf_path, output_dir, fixed_length=1080):
     log_message(f"Converting PDF to images at fixed length {fixed_length}px...")
     if not os.path.exists(pdf_path):
@@ -211,10 +178,10 @@ class BlockDetectionModel:
             raise ValueError(f"Directory {images_dir} is empty or does not exist.")
         images = glob.glob(os.path.join(images_dir, "*.jpg"))
         log_message(f"Found {len(images)} low-res images for detection.")
-        
+
         output = {}
         batch_size = 10  # Process 10 images at a time
-        
+
         # Process images in batches of 10
         for i in range(0, len(images), batch_size):
             batch = images[i:i + batch_size]
@@ -225,7 +192,7 @@ class BlockDetectionModel:
                 labels = result.boxes.cls.tolist()
                 boxes = result.boxes.xywh.tolist()
                 output[image_name] = [{"label": label, "bbox": box} for label, box in zip(labels, boxes)]
-        
+
         log_message("Block detection completed.")
         return output
 
@@ -292,11 +259,11 @@ def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_ima
     # Create a temporary directory to store the files
     temp_dir = os.path.join(DATA_DIR, "temp_files")
     os.makedirs(temp_dir, exist_ok=True)
-    
+
     # Save the FAISS index
     faiss_index_path = os.path.join(temp_dir, "faiss_index.index")
     faiss.write_index(vector_store.index, faiss_index_path)
-    
+
     # Save the docstore using pickle
     docstore_path = os.path.join(temp_dir, "docstore.pkl")
     with open(docstore_path, "wb") as f:
@@ -316,14 +283,14 @@ def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_ima
         image_path = os.path.join(high_res_images_dir, image_name)
         if os.path.isfile(image_path):
             shutil.copy(image_path, os.path.join(high_res_image_dir, image_name))
-    
+
     # Create a zip file containing all necessary files
     zip_file_path = zip_filename
     with zipfile.ZipFile(zip_file_path, 'w') as zipf:
         zipf.write(faiss_index_path, "faiss_index.index")
         zipf.write(docstore_path, "docstore.pkl")
         zipf.write(document_path, "document.pkl")
-        
+
         # Add the images to the zip file
         for image_name in os.listdir(high_res_image_dir):
             image_path = os.path.join(high_res_image_dir, image_name)
@@ -341,7 +308,7 @@ def save_vector_store_as_zip(vector_store, documents, zip_filename, high_res_ima
                 print(f"File not found: {temp_file_path}")
         except Exception as e:
             print(f"Failed to remove {temp_file_path}: {e}")
-    
+
     shutil.rmtree(temp_dir)  # Remove the temporary directory
 
     return zip_file_path
@@ -354,15 +321,15 @@ def load_vector_store_from_zip(zip_filename, extraction_dir=DATA_DIR):
     # Create a temporary directory to extract the zip content
     temp_dir = os.path.join(extraction_dir, "temp_files")
     os.makedirs(temp_dir, exist_ok=True)
-    
+
     # Extract the zip file
     with zipfile.ZipFile(zip_filename, 'r') as zipf:
         zipf.extractall(temp_dir)
-    
+
     # Load the FAISS index
     faiss_index_path = os.path.join(temp_dir, "faiss_index.index")
     faiss_index = faiss.read_index(faiss_index_path)
-    
+
     # Load the docstore
     docstore_path = os.path.join(temp_dir, "docstore.pkl")
     with open(docstore_path, "rb") as f:
@@ -407,11 +374,7 @@ async def run_pipeline(pdf_path, ocr_prompt):
 
     log_message("Extracting metadata using Gemini OCR...")
     gemini_documents = await process_all_pages(cropped_data, ocr_prompt)
-    combined_path = os.path.join(DATA_DIR, "gemini_combined.json")
-    with open(combined_path, "w", encoding="utf-8") as jf:
-        json.dump([json.loads(d.page_content) for d in gemini_documents],
-                  jf, ensure_ascii=False, indent=4)
-    log_message(f"Combined Gemini JSON saved → {combined_path}")
+
     log_message("Building vector store for semantic search...")
     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
     example_embedding = embeddings.embed_query("sample text")
@@ -426,22 +389,25 @@ async def run_pipeline(pdf_path, ocr_prompt):
     uuids = [str(uuid4()) for _ in range(len(gemini_documents))]
     vector_store.add_documents(documents=gemini_documents, ids=uuids)
 
-    return gemini_documents, vector_store, combined_path
+    return gemini_documents, vector_store
 
 # -------------------------
 # UI Layout (Streamlit)
+# UI Layout
 # -------------------------
 st.sidebar.title("PDF Processing")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_pdf:
     if uploaded_pdf.name != st.session_state.previous_pdf_uploaded:
+        # Reset the session state for a new PDF upload
         st.session_state.processed = False
         st.session_state.gemini_documents = None
         st.session_state.vector_store = None
-        st.session_state.previous_pdf_uploaded = uploaded_pdf.name
+        st.session_state.compression_retriever = None
+        st.session_state.previous_pdf_uploaded = uploaded_pdf.name  # Store the name of the newly uploaded PDF
 
-    os.makedirs(DATA_DIR, exist_ok=True)  
+    os.makedirs(DATA_DIR, exist_ok=True)  # Ensure the data directory exists.
     pdf_path = os.path.join(DATA_DIR, uploaded_pdf.name)
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.getbuffer())
@@ -449,26 +415,19 @@ if uploaded_pdf:
 
 if uploaded_pdf and not st.session_state.processed:
     if st.sidebar.button("Run Processing Pipeline"):
-        log_message("Starting pipeline...")
-        ocr_prompt = COMBINED_PROMPT
-        gemini_documents, vector_store, json_path = asyncio.run(run_pipeline(pdf_path, ocr_prompt))
+        log_message("PDF uploaded successfully. Starting the pipeline...")
 
-        # Update session state
+        # Run the processing pipeline asynchronously
+        ocr_prompt = COMBINED_PROMPT
+        gemini_documents, vector_store = asyncio.run(run_pipeline(pdf_path))
+
+        # Update session state with processed data
         st.session_state.gemini_documents = gemini_documents
         st.session_state.vector_store = vector_store
-        st.session_state.json_path       = json_path
         st.session_state.processed = True
-        log_message("Processing completed.")
-        
+        log_message("Processing pipeline completed.")
 
-if st.session_state.get("json_path"):
-    with open(st.session_state.json_path, "rb") as jf:
-        st.download_button(
-            label="📥 Download combined Gemini JSON",
-            data=jf.read(),
-            file_name="gemini_combined.json",
-            mime="application/json"
-        )    
+
 # Vector Store Download Button
 if uploaded_pdf and st.session_state.processed:
     # Add the "Download Vector Store" button
@@ -481,7 +440,7 @@ if uploaded_pdf and st.session_state.processed:
             st.session_state.gemini_documents, 
             os.path.join(DATA_DIR, vector_store_filename)
         )
-        
+
         # Offer the zip file for download
         with open(zip_file_path, "rb") as f:
             zip_data = f.read()
